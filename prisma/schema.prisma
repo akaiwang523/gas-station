@@ -156,5 +156,8 @@ enum PaymentMethod {
   TRANSFER
   LINE_PAY
 }
+
+{
 "postinstall": "prisma generate",
 
+}
