@@ -1,4 +1,4 @@
-ggenerator client {
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -156,3 +156,5 @@ enum PaymentMethod {
   TRANSFER
   LINE_PAY
 }
+"postinstall": "prisma generate",
+
