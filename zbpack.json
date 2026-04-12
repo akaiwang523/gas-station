@@ -1,0 +1,4 @@
+{
+  "alpine": ["openssl"],
+  "ubuntu": ["openssl"]
+}
