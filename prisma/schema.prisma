@@ -1,7 +1,7 @@
 generator client {
   provider      = "prisma-client-js"
-  // 刪除原本的 linux-musl，強制它只能用 openssl-3.0.x 的版本
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  engineType    = "library"   // 👉 加入這行，強制使用新型引擎避開 OpenSSL 衝突
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
