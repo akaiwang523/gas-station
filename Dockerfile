@@ -1,8 +1,8 @@
-FROM node:20-slim
+FROM node:20-alpine
 
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache openssl1.1-compat
 
-WORKDIR /app
+WORKDIR /src
 
 COPY package*.json ./
 COPY prisma ./prisma/
