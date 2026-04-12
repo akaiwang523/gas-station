@@ -1,8 +1,7 @@
 generator client {
-  provider      = "prisma-client-js"
-  engineType    = "library"   // 👉 加入這行，強制使用新型引擎避開 OpenSSL 衝突
-  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "linux-musl", "linux-musl-openssl-3.0.x"]
+  provider = "prisma-client-js"
 }
+// 只要這樣就好，不用加 binaryTargets，也不用 engineType
 
 datasource db {
   provider = "mysql"
