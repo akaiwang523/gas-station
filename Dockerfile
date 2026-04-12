@@ -4,14 +4,9 @@ RUN apt-get update && apt-get install -y openssl libssl-dev && rm -rf /var/lib/a
 
 WORKDIR /src
 
-COPY package*.json ./
-COPY prisma ./prisma/
+COPY . .
 
 RUN npm install
-
-RUN npx prisma generate
-
-COPY . .
 
 EXPOSE 8080
 
