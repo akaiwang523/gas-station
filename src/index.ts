@@ -24,7 +24,7 @@ app.use('/api/caller', callerRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/ar', arRoutes)
 
-const frontendDist = path.join(process.cwd(), '../frontend/dist')
+const frontendDist = '/app/frontend/dist'
 app.use(express.static(frontendDist))
 app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'))
