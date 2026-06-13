@@ -17,9 +17,6 @@ const PORT = process.env.PORT || 8080
 app.use(cors({ origin: '*', credentials: true }))
 app.use(express.json())
 
-console.log('CWD:', process.cwd())
-console.log('__dirname:', __dirname)
-
 app.get('/health', (_req, res) => res.json({ ok: true }))
 app.use('/api/auth', authRoutes)
 app.use('/api/customers', customerRoutes)
@@ -27,8 +24,7 @@ app.use('/api/caller', callerRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/ar', arRoutes)
 
-const frontendDist = path.join(process.cwd(), 'frontend/dist')
-console.log('frontendDist:', frontendDist)
+const frontendDist = path.join(process.cwd(), '../frontend/dist')
 app.use(express.static(frontendDist))
 app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'))
