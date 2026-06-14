@@ -50,11 +50,13 @@ export const api = {
     request(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // Orders
-  getOrders: (params?: { status?: string; date?: string; driverId?: number }) => {
+  getOrders: (params?: { status?: string; date?: string; driverId?: number; customerId?: number; limit?: number }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
     if (params?.date) q.set('date', params.date)
     if (params?.driverId) q.set('driverId', String(params.driverId))
+    if (params?.customerId) q.set('customerId', String(params.customerId))
+    if (params?.limit) q.set('limit', String(params.limit))
     return request(`/orders?${q}`)
   },
   getTodaySummary: () => request('/orders/summary'),

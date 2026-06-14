@@ -2,16 +2,19 @@ import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
 export async function listOrders(req: Request, res: Response) {
-  const { status, date } = req.query
+  const { status, date, customerId, limit = '10' } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
   if (status) { conditions.push('o.status = ?'); params.push(status) }
-  if (date) {
-    conditions.push('DATE(o.created_at) = ?')
-    params.push(date)
-  } else {
-    conditions.push('DATE(o.created_at) = CURDATE()')
+  if (customerId) { conditions.push('o.customer_id = ?'); params.push(customerId) }
+  if (!customerId) {
+    if (date) {
+      conditions.push('DATE(o.created_at) = ?')
+      params.push(date)
+    } else {
+      conditions.push('DATE(o.created_at) = CURDATE()')
+    }
   }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
@@ -25,8 +28,9 @@ export async function listOrders(req: Request, res: Response) {
      LEFT JOIN customers c ON c.id = o.customer_id
      LEFT JOIN users u ON u.id = o.driver_id
      ${where}
-     ORDER BY o.created_at DESC`,
-    params
+     ORDER BY o.created_at DESC
+     LIMIT ?`,
+    [...params, Number(limit)]
   ) as any
 
   // 取得每筆訂單的品項

@@ -41,6 +41,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [items, setItems] = useState<Item[]>([
     { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: 800 }
   ])
+  const [lastOrderHint, setLastOrderHint] = useState<string>('')
   const [stairFee, setStairFee] = useState(0)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [note, setNote] = useState('')
@@ -60,13 +61,34 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     }, 300)
   }, [search])
 
-  function selectCustomer(c: Customer) {
+  async function selectCustomer(c: Customer) {
     setSelected(c)
     setIsNew(false)
     setSearch(c.name)
     setResults([])
     if (Number(c.amount_owed) > 0) setPaymentType('AR')
     else setPaymentType('CASH')
+
+    // 帶出上一單
+    try {
+      const res = await api.getOrders({ customerId: c.id, limit: 1 })
+      const last = res.orders?.[0]
+      if (last && last.items && last.items.length > 0) {
+        setItems(last.items.map((i: any) => ({
+          gas_type: i.gas_type,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        })))
+        const hint = last.items.map((i: any) => `${GAS_LABELS[i.gas_type]} × ${i.quantity}`).join('、')
+        setLastOrderHint(`上次：${hint}，共 $${Number(last.total_amount).toLocaleString()}`)
+      } else {
+        setItems([{ gas_type: c.gas_type || 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || GAS_DEFAULT_PRICE[c.gas_type] || 800 }])
+        setLastOrderHint('')
+      }
+    } catch {
+      setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || 800 }])
+      setLastOrderHint('')
+    }
   }
 
   function selectNew() {
@@ -74,6 +96,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setIsNew(true)
     setNewName(search)
     setResults([])
+    setLastOrderHint('')
   }
 
   function addItem() {
@@ -107,6 +130,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setPaymentType('CASH')
     setNote('')
     setError('')
+    setLastOrderHint('')
   }
 
   async function handleSubmit() {
@@ -122,10 +146,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           return
         }
         const res = await api.createCustomer({
-          name: newName,
-          phone: newPhone,
-          address: newAddress,
-          gasType: 'BOTTLED_20KG',
+          name: newName, phone: newPhone, address: newAddress, gasType: 'BOTTLED_20KG',
         })
         customerId = res.id
       } else if (selected) {
@@ -137,14 +158,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       }
 
       const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
-
-      await api.createOrder({
-        customerId,
-        items,
-        stairFee,
-        paymentType,
-        note: totalNote,
-      })
+      await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote })
 
       const name = isNew ? newName : selected!.name
       const totalQty = items.reduce((s, i) => s + i.quantity, 0)
@@ -176,7 +190,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
           placeholder="輸入姓名或電話搜尋..."
           value={search}
-          onChange={e => { setSearch(e.target.value); setSelected(null); setIsNew(false) }}
+          onChange={e => { setSearch(e.target.value); setSelected(null); setIsNew(false); setLastOrderHint('') }}
         />
         {(results.length > 0 || (search.length > 0 && !selected && !isNew)) && (
           <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 max-h-60 overflow-y-auto">
@@ -196,13 +210,14 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         )}
       </div>
 
-      {/* 選中的舊客戶 */}
+      {/* 選中客戶 */}
       {selected && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex justify-between items-start">
           <div>
             <div className="font-medium text-gray-800">{selected.name}</div>
             <div className="text-sm text-gray-600">{selected.phone}　{selected.address}</div>
             {Number(selected.amount_owed) > 0 && <div className="text-sm text-red-500 mt-1">⚠️ 目前欠款 ${Number(selected.amount_owed).toLocaleString()}</div>}
+            {lastOrderHint && <div className="text-xs text-orange-600 mt-1">🕐 {lastOrderHint}</div>}
           </div>
           <button onClick={reset} className="text-gray-400 text-xl">×</button>
         </div>
@@ -233,13 +248,9 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
                   value={item.gas_type}
                   onChange={e => updateItem(idx, 'gas_type', e.target.value)}
                 >
-                  {Object.entries(GAS_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
-                  ))}
+                  {Object.entries(GAS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
-                {items.length > 1 && (
-                  <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold">×</button>
-                )}
+                {items.length > 1 && <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold">×</button>}
               </div>
               <div className="flex gap-3 items-center">
                 <div className="flex items-center gap-2">
@@ -249,16 +260,9 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
                 </div>
                 <div className="flex items-center gap-1 flex-1">
                   <span className="text-sm text-gray-500">單價</span>
-                  <input
-                    type="number"
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                    value={item.unit_price}
-                    onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))}
-                  />
+                  <input type="number" className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))} />
                 </div>
-                <div className="text-sm font-medium text-gray-700 w-20 text-right">
-                  ${(item.quantity * item.unit_price).toLocaleString()}
-                </div>
+                <div className="text-sm font-medium text-gray-700 w-20 text-right">${(item.quantity * item.unit_price).toLocaleString()}</div>
               </div>
             </div>
           ))}
@@ -271,13 +275,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       {/* 樓梯費 */}
       <div className="flex items-center gap-3">
         <label className="text-sm font-medium text-gray-700 whitespace-nowrap">樓梯費</label>
-        <input
-          type="number"
-          className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          value={stairFee || ''}
-          placeholder="0"
-          onChange={e => setStairFee(Number(e.target.value) || 0)}
-        />
+        <input type="number" className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" value={stairFee || ''} placeholder="0" onChange={e => setStairFee(Number(e.target.value) || 0)} />
         <span className="text-sm text-gray-500">元</span>
       </div>
 
@@ -304,23 +302,14 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
             <span>${(item.quantity * item.unit_price).toLocaleString()}</span>
           </div>
         ))}
-        {stairFee > 0 && (
-          <div className="flex justify-between text-sm text-gray-500">
-            <span>樓梯費</span>
-            <span>${stairFee.toLocaleString()}</span>
-          </div>
-        )}
+        {stairFee > 0 && <div className="flex justify-between text-sm text-gray-500"><span>樓梯費</span><span>${stairFee.toLocaleString()}</span></div>}
         <div className="flex justify-between items-center pt-2 border-t border-gray-200">
           <span className="text-gray-600 font-medium">合計金額</span>
           <span className="text-2xl font-bold text-orange-600">${total.toLocaleString()}</span>
         </div>
       </div>
 
-      <button
-        onClick={handleSubmit}
-        disabled={loading || (!selected && !isNew)}
-        className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition"
-      >
+      <button onClick={handleSubmit} disabled={loading || (!selected && !isNew)} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition">
         {loading ? '建單中...' : '✅ 建立訂單'}
       </button>
     </div>
