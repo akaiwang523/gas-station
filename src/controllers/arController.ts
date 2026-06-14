@@ -63,7 +63,7 @@ export async function getCustomerAr(req: Request, res: Response) {
       SUM(CASE WHEN status = 'DELIVERED' THEN 0 ELSE total_amount END) as unpaid_amount
      FROM orders
      WHERE customer_id = ? AND payment_type = 'AR'
-     GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+     GROUP BY DATE_FORMAT(created_at, '%Y-%m'), DATE_FORMAT(created_at, '%Y年%m月')
      ORDER BY month DESC`,
     [customerId]
   ) as any
