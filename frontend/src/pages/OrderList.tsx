@@ -77,6 +77,20 @@ export default function OrderList({ refresh }: { refresh?: number }) {
     finally { setActionId(null) }
   }
 
+  async function cancelOrder(id: number) {
+    if (!window.confirm('確定要取消這筆訂單嗎？')) return
+    setActionId(id)
+    try { await api.cancelOrder(id); await load() }
+    finally { setActionId(null) }
+  }
+
+  async function deleteOrder(id: number) {
+    if (!window.confirm('確定要刪除這筆訂單嗎？刪除後無法復原。')) return
+    setActionId(id)
+    try { await api.deleteOrder(id); await load() }
+    finally { setActionId(null) }
+  }
+
   const pending = orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
 
@@ -147,6 +161,9 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                     ✅ 完成送達
                   </button>
                 )}
+                <button onClick={() => cancelOrder(order.id)} disabled={actionId === order.id} className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
+                  取消
+                </button>
               </div>
             </div>
           ))}
@@ -171,10 +188,13 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 <div className="text-right">
                   <div className="text-sm text-gray-500">${Number(order.total_amount).toLocaleString()}</div>
                   {order.status === 'DELIVERED' && (
-                    <button onClick={() => undoDelivered(order.id)} disabled={actionId === order.id} className="text-xs text-orange-400 hover:text-orange-600 mt-1 transition">
+                    <button onClick={() => undoDelivered(order.id)} disabled={actionId === order.id} className="text-xs text-orange-400 hover:text-orange-600 mt-1 transition block">
                       ↩ 撤銷
                     </button>
                   )}
+                  <button onClick={() => deleteOrder(order.id)} disabled={actionId === order.id} className="text-xs text-red-400 hover:text-red-600 mt-1 transition block">
+                    🗑 刪除
+                  </button>
                 </div>
               </div>
             </div>

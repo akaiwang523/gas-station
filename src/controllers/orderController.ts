@@ -153,3 +153,37 @@ export async function getTodaySummary(_req: Request, res: Response) {
   ) as any
   res.json(rows[0])
 }
+
+export async function cancelOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
+  const order = orderRows[0]
+  if (!order) return res.status(404).json({ error: '訂單不存在' })
+  if (order.status === 'DELIVERED') return res.status(400).json({ error: '已完成訂單無法取消，請使用撤銷' })
+
+  // 如果是欠帳單，回滾 ar_balances
+  if (order.payment_type === 'AR') {
+    await db.query(
+      `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
+      [order.total_amount, order.quantity, order.customer_id]
+    )
+  }
+
+  await db.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [id])
+  res.json({ ok: true })
+}
+
+export async function deleteOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
+  const order = orderRows[0]
+  if (!order) return res.status(404).json({ error: '訂單不存在' })
+  if (order.status !== 'CANCELLED' && order.status !== 'DELIVERED') {
+    return res.status(400).json({ error: '只能刪除已取消或已完成的訂單' })
+  }
+
+  await db.query('DELETE FROM order_items WHERE order_id = ?', [id])
+  await db.query('DELETE FROM payments WHERE order_id = ?', [id])
+  await db.query('DELETE FROM orders WHERE id = ?', [id])
+  res.json({ ok: true })
+}

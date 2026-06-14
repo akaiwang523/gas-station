@@ -74,4 +74,8 @@ export const api = {
     request(`/ar/${customerId}`),
   receivePayment: (customerId: number, data: any) =>
     request(`/ar/${customerId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
+  cancelOrder: (id: number) =>
+    request(`/orders/${id}/cancel`, { method: 'PATCH' }),
+  deleteOrder: (id: number) =>
+    request(`/orders/${id}`, { method: 'DELETE' }),
 }
