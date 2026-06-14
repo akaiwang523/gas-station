@@ -61,11 +61,11 @@ export default function ArPage() {
   const [monthLoading, setMonthLoading] = useState(false)
   const monthOptions = getMonthOptions()
 
-  async function load() {
+  async function load(currentTab?: string) {
     setLoading(true)
     try {
-      const res = await api.getArBalances(search, undefined, tab)
-      setBalances(res.balances)
+      const res = await api.getArBalances(search, undefined, currentTab || tab)
+      setBalances(res.balances || [])
     } finally {
       setLoading(false)
     }
@@ -81,7 +81,7 @@ export default function ArPage() {
     }
   }
 
-  useEffect(() => { load() }, [tab])
+  useEffect(() => { load(tab) }, [tab])
 
   async function openDetail(b: Balance) {
     setSelected(b)
@@ -329,7 +329,7 @@ export default function ArPage() {
       {/* 搜尋 */}
       <div className="flex gap-2">
         <input className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="搜尋客戶..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} />
-        <button onClick={load} className="px-4 py-2.5 bg-orange-500 text-white rounded-xl font-medium">搜尋</button>
+        <button onClick={() => load()} className="px-4 py-2.5 bg-orange-500 text-white rounded-xl font-medium">搜尋</button>
       </div>
 
       {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
