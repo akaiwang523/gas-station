@@ -1,14 +1,12 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
-// 取得訂單列表
 export async function listOrders(req: Request, res: Response) {
-  const { status, date, driverId, page = '1', limit = '50' } = req.query
+  const { status, date } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
   if (status) { conditions.push('o.status = ?'); params.push(status) }
-  if (driverId) { conditions.push('o.driver_id = ?'); params.push(driverId) }
   if (date) {
     conditions.push('DATE(o.created_at) = ?')
     params.push(date)
@@ -17,7 +15,6 @@ export async function listOrders(req: Request, res: Response) {
   }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
-  const offset = (Number(page) - 1) * Number(limit)
 
   const [orders] = await db.query(
     `SELECT o.*, 
@@ -28,32 +25,58 @@ export async function listOrders(req: Request, res: Response) {
      LEFT JOIN customers c ON c.id = o.customer_id
      LEFT JOIN users u ON u.id = o.driver_id
      ${where}
-     ORDER BY o.created_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, Number(limit), offset]
+     ORDER BY o.created_at DESC`,
+    params
   ) as any
+
+  // 取得每筆訂單的品項
+  const orderIds = orders.map((o: any) => o.id)
+  let itemsMap: Record<number, any[]> = {}
+  if (orderIds.length > 0) {
+    const [items] = await db.query(
+      `SELECT * FROM order_items WHERE order_id IN (?)`,
+      [orderIds]
+    ) as any
+    items.forEach((item: any) => {
+      if (!itemsMap[item.order_id]) itemsMap[item.order_id] = []
+      itemsMap[item.order_id].push(item)
+    })
+  }
+
+  orders.forEach((o: any) => { o.items = itemsMap[o.id] || [] })
 
   res.json({ orders })
 }
 
-// 建立訂單
 export async function createOrder(req: Request, res: Response) {
-  const { customerId, quantity, unitPrice, note, paymentType = 'CASH', stairFee = 0 } = req.body
-  if (!customerId || !quantity || !unitPrice) {
+  const { customerId, items, stairFee = 0, note, paymentType = 'CASH' } = req.body
+
+  if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '缺少必要欄位' })
   }
 
-  const totalAmount = Number(quantity) * Number(unitPrice) + Number(stairFee)
+  const gasTotal = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unit_price), 0)
+  const totalAmount = gasTotal + Number(stairFee)
+  const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
 
   const [result] = await db.query(
     `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)
      VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
-    [customerId, quantity, unitPrice, totalAmount, note || null, paymentType]
+    [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType]
   ) as any
 
   const orderId = result.insertId
 
-  // 如果是欠帳，更新 ar_balances
+  // 寫入品項
+  for (const item of items) {
+    const subtotal = Number(item.quantity) * Number(item.unit_price)
+    await db.query(
+      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+      [orderId, item.gas_type, item.quantity, item.unit_price, subtotal]
+    )
+  }
+
+  // 欠帳處理
   if (paymentType === 'AR') {
     await db.query(
       `INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed)
@@ -62,17 +85,15 @@ export async function createOrder(req: Request, res: Response) {
          amount_owed = amount_owed + VALUES(amount_owed),
          cylinders_owed = cylinders_owed + VALUES(cylinders_owed),
          updated_at = NOW()`,
-      [customerId, totalAmount, quantity]
+      [customerId, totalAmount, totalQuantity]
     )
   }
 
-  // 更新客戶最後配送時間
   await db.query('UPDATE customers SET last_delivery = NOW() WHERE id = ?', [customerId])
 
   res.status(201).json({ id: orderId, totalAmount })
 }
 
-// 更新訂單狀態
 export async function updateOrderStatus(req: Request, res: Response) {
   const id = Number(req.params.id)
   const { status, driverId } = req.body
@@ -88,7 +109,6 @@ export async function updateOrderStatus(req: Request, res: Response) {
   res.json({ ok: true })
 }
 
-// 訂單收款
 export async function collectPayment(req: Request, res: Response) {
   const orderId = Number(req.params.id)
   const { amount, method = 'CASH', note } = req.body
@@ -103,7 +123,6 @@ export async function collectPayment(req: Request, res: Response) {
     [orderId, collectedBy, amount, method, note || null]
   )
 
-  // 如果是欠帳訂單收款，更新 ar_balances
   if (order.payment_type === 'AR') {
     await db.query(
       `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
@@ -115,7 +134,6 @@ export async function collectPayment(req: Request, res: Response) {
   res.json({ ok: true })
 }
 
-// 取得今日統計
 export async function getTodaySummary(_req: Request, res: Response) {
   const [rows] = await db.query(
     `SELECT 
