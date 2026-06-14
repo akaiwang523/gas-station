@@ -46,6 +46,7 @@ function getMonthOptions() {
 }
 
 export default function ArPage() {
+  const [tab, setTab] = useState<'unpaid' | 'paid'>('unpaid')
   const [balances, setBalances] = useState<Balance[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -63,14 +64,14 @@ export default function ArPage() {
   async function load() {
     setLoading(true)
     try {
-      const res = await api.getArBalances(search)
+      const res = await api.getArBalances(search, undefined, tab)
       setBalances(res.balances)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [tab])
 
   async function openDetail(b: Balance) {
     setSelected(b)
@@ -327,6 +328,22 @@ export default function ArPage() {
       <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center">
         <span className="text-gray-600 font-medium">應收帳款總計</span>
         <span className="text-2xl font-bold text-red-600">${totalOwed.toLocaleString()}</span>
+      </div>
+
+      {/* Tab 切換 */}
+      <div className="flex bg-gray-100 rounded-xl p-1">
+        <button
+          onClick={() => setTab('unpaid')}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'unpaid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}
+        >
+          未結清 ({balances.length})
+        </button>
+        <button
+          onClick={() => setTab('paid')}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'paid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}
+        >
+          已結清
+        </button>
       </div>
 
       {/* 月份查詢 */}

@@ -68,10 +68,11 @@ export const api = {
     request(`/orders/${orderId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
 
   // AR
-  getArBalances: (search?: string, month?: string) => {
+  getArBalances: (search?: string, month?: string, tab?: string) => {
     const q = new URLSearchParams()
     if (search) q.set('search', search)
     if (month) q.set('month', month)
+    if (tab) q.set('tab', tab)
     return request(`/ar${q.toString() ? '?' + q.toString() : ''}`)
   },
   getCustomerAr: (customerId: number) =>

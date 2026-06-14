@@ -3,8 +3,8 @@ import { db } from '../lib/db'
 
 // 欠帳客戶列表（支援月份篩選）
 export async function listArBalances(req: Request, res: Response) {
-  const { search, month } = req.query
-  const conditions = ['a.amount_owed > 0']
+  const { search, month, tab } = req.query
+  const conditions = tab === 'paid' ? ['a.amount_owed <= 0'] : ['a.amount_owed > 0']
   const params: any[] = []
 
   if (search) {
