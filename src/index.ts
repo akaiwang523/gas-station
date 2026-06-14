@@ -7,6 +7,7 @@ import { authRoutes } from './routes/auth'
 import { callerRoutes } from './routes/caller'
 import { orderRoutes } from './routes/orders'
 import { arRoutes } from './routes/ar'
+import { reportRoutes } from './routes/reports'
 import { errorHandler } from './middleware/errorHandler'
 
 dotenv.config()
@@ -23,8 +24,10 @@ app.use('/api/customers', customerRoutes)
 app.use('/api/caller', callerRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/ar', arRoutes)
+app.use('/api/reports', reportRoutes)
 
-const frontendDist = '/src/frontend/dist'
+// Serve frontend
+const frontendDist = path.join(__dirname, '../frontend/dist')
 app.use(express.static(frontendDist))
 app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'))

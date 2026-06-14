@@ -79,6 +79,8 @@ export const api = {
     request(`/ar/${customerId}`),
   receivePayment: (customerId: number, data: any) =>
     request(`/ar/${customerId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
+  getTodayReport: () => request('/reports/today'),
+  getMonthReport: (month: string) => request(`/reports/month?month=${month}`),
   getStatement: (customerId: number, month?: string) =>
     request(`/ar/${customerId}/statement${month ? `?month=${month}` : ''}`),
   cancelOrder: (id: number) =>

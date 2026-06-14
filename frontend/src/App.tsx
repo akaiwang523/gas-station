@@ -3,10 +3,11 @@ import Login from './pages/Login'
 import NewOrder from './pages/NewOrder'
 import OrderList from './pages/OrderList'
 import ArPage from './pages/ArPage'
+import ReportPage from './pages/ReportPage'
 import CustomerPage from './pages/CustomerPage'
 import './index.css'
 
-type Page = 'orders' | 'new' | 'ar' | 'customers'
+type Page = 'orders' | 'new' | 'ar' | 'customers' | 'report'
 
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'))
@@ -27,6 +28,7 @@ export default function App() {
     { key: 'new', label: '接單', icon: '➕' },
     { key: 'ar', label: '欠帳', icon: '📒' },
     { key: 'customers', label: '客戶', icon: '👥' },
+    { key: 'report', label: '報表', icon: '📊' },
   ]
 
   return (
@@ -48,6 +50,7 @@ export default function App() {
         {page === 'new' && <NewOrder onOrderCreated={handleOrderCreated} />}
         {page === 'ar' && <ArPage />}
         {page === 'customers' && <CustomerPage />}
+        {page === 'report' && <ReportPage />}
       </div>
 
       {/* Bottom Nav */}
