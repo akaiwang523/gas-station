@@ -236,21 +236,23 @@ export default function ArPage() {
           </div>
         </div>
 
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-3">
-          <div className="text-sm font-medium text-orange-700">收款</div>
-          <input type="number" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-xl font-bold focus:outline-none focus:ring-2 focus:ring-orange-400" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
-          <div className="flex gap-2">
-            {['CASH','TRANSFER','LINE_PAY'].map(m => (
-              <button key={m} onClick={() => setPayMethod(m)} className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${payMethod === m ? 'bg-orange-500 text-white' : 'bg-white text-gray-600'}`}>
-                {METHOD_LABELS[m]}
-              </button>
-            ))}
+        {tab === 'unpaid' && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-3">
+            <div className="text-sm font-medium text-orange-700">收款</div>
+            <input type="number" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-xl font-bold focus:outline-none focus:ring-2 focus:ring-orange-400" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
+            <div className="flex gap-2">
+              {['CASH','TRANSFER','LINE_PAY'].map(m => (
+                <button key={m} onClick={() => setPayMethod(m)} className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${payMethod === m ? 'bg-orange-500 text-white' : 'bg-white text-gray-600'}`}>
+                  {METHOD_LABELS[m]}
+                </button>
+              ))}
+            </div>
+            <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none" placeholder="備註（選填）" value={payNote} onChange={e => setPayNote(e.target.value)} />
+            <button onClick={handlePay} disabled={payLoading || !payAmount} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl transition">
+              {payLoading ? '處理中...' : '✅ 確認收款'}
+            </button>
           </div>
-          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none" placeholder="備註（選填）" value={payNote} onChange={e => setPayNote(e.target.value)} />
-          <button onClick={handlePay} disabled={payLoading || !payAmount} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl transition">
-            {payLoading ? '處理中...' : '✅ 確認收款'}
-          </button>
-        </div>
+        )}
 
         <div className="space-y-2">
           <div className="text-sm font-medium text-gray-700">產生對帳單</div>
@@ -319,7 +321,7 @@ export default function ArPage() {
       </div>
 
       {/* 月份查詢 */}
-      {tab === 'unpaid' && (
+      {(
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
           <div className="text-sm font-medium text-gray-700">📅 按月篩選</div>
           <div className="flex gap-2 flex-wrap">
