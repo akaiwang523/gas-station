@@ -38,12 +38,12 @@ export async function listOrders(req: Request, res: Response) {
 
 // 建立訂單
 export async function createOrder(req: Request, res: Response) {
-  const { customerId, quantity, unitPrice, note, paymentType = 'CASH' } = req.body
+  const { customerId, quantity, unitPrice, note, paymentType = 'CASH', stairFee = 0 } = req.body
   if (!customerId || !quantity || !unitPrice) {
     return res.status(400).json({ error: '缺少必要欄位' })
   }
 
-  const totalAmount = Number(quantity) * Number(unitPrice)
+  const totalAmount = Number(quantity) * Number(unitPrice) + Number(stairFee)
 
   const [result] = await db.query(
     `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)

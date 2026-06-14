@@ -12,18 +12,17 @@ type Customer = {
   gas_type: string
 }
 
-const GAS_PRICES: Record<string, number> = {
-  BOTTLED_20KG: 800,
-  BOTTLED_16KG: 650,
-  BOTTLED_4KG: 200,
-}
-
 export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => void }) {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Customer[]>([])
   const [selected, setSelected] = useState<Customer | null>(null)
+  const [isNew, setIsNew] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newAddress, setNewAddress] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [unitPrice, setUnitPrice] = useState(800)
+  const [stairFee, setStairFee] = useState(0)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
@@ -44,36 +43,77 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
 
   function selectCustomer(c: Customer) {
     setSelected(c)
+    setIsNew(false)
     setSearch(c.name)
     setResults([])
-    setUnitPrice(c.price_override || GAS_PRICES[c.gas_type] || 800)
+    setUnitPrice(c.price_override || 800)
     if (Number(c.amount_owed) > 0) setPaymentType('AR')
     else setPaymentType('CASH')
   }
 
+  function selectNew() {
+    setSelected(null)
+    setIsNew(true)
+    setNewName(search)
+    setResults([])
+  }
+
   function reset() {
     setSelected(null)
+    setIsNew(false)
     setSearch('')
+    setNewName('')
+    setNewPhone('')
+    setNewAddress('')
     setQuantity(1)
     setUnitPrice(800)
+    setStairFee(0)
     setPaymentType('CASH')
     setNote('')
     setError('')
   }
 
   async function handleSubmit() {
-    if (!selected) { setError('請先選擇客戶'); return }
     setLoading(true)
     setError('')
     try {
+      let customerId: number
+
+      if (isNew) {
+        if (!newName || !newPhone || !newAddress) {
+          setError('請填寫新客戶的姓名、電話和地址')
+          setLoading(false)
+          return
+        }
+        const res = await api.createCustomer({
+          name: newName,
+          phone: newPhone,
+          address: newAddress,
+          gasType: 'BOTTLED_20KG',
+          priceOverride: unitPrice,
+        })
+        customerId = res.id
+      } else if (selected) {
+        customerId = selected.id
+      } else {
+        setError('請選擇客戶或填寫新客戶資料')
+        setLoading(false)
+        return
+      }
+
+      const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
+
       await api.createOrder({
-        customerId: selected.id,
+        customerId,
         quantity,
         unitPrice,
+        stairFee,
         paymentType,
-        note,
+        note: totalNote,
       })
-      setSuccess(`✅ 已建單：${selected.name} × ${quantity} 桶`)
+
+      const name = isNew ? newName : selected!.name
+      setSuccess(`✅ 已建單：${name} × ${quantity} 桶`)
       onOrderCreated?.()
       reset()
       setTimeout(() => setSuccess(''), 3000)
@@ -84,7 +124,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     }
   }
 
-  const total = quantity * unitPrice
+  const total = quantity * unitPrice + stairFee
 
   return (
     <div className="max-w-lg mx-auto p-4 space-y-4">
@@ -108,16 +148,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
           placeholder="輸入姓名或電話搜尋..."
           value={search}
-          onChange={e => { setSearch(e.target.value); setSelected(null) }}
+          onChange={e => { setSearch(e.target.value); setSelected(null); setIsNew(false) }}
         />
-        {results.length > 0 && (
+        {(results.length > 0 || (search.length > 0 && !selected && !isNew)) && (
           <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 max-h-60 overflow-y-auto">
             {results.map(c => (
-              <div
-                key={c.id}
-                className="px-4 py-3 hover:bg-orange-50 cursor-pointer border-b last:border-b-0"
-                onClick={() => selectCustomer(c)}
-              >
+              <div key={c.id} className="px-4 py-3 hover:bg-orange-50 cursor-pointer border-b" onClick={() => selectCustomer(c)}>
                 <div className="font-medium text-gray-800">{c.name}</div>
                 <div className="text-sm text-gray-500">{c.phone}　{c.address}</div>
                 {Number(c.amount_owed) > 0 && (
@@ -125,18 +161,54 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
                 )}
               </div>
             ))}
+            {search.length > 0 && (
+              <div className="px-4 py-3 hover:bg-blue-50 cursor-pointer text-blue-600 font-medium flex items-center gap-2" onClick={selectNew}>
+                <span>➕</span> 新客人「{search}」
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* 選中的客戶資訊 */}
+      {/* 選中的舊客戶 */}
       {selected && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-          <div className="font-medium text-gray-800">{selected.name}</div>
-          <div className="text-sm text-gray-600">{selected.phone}　{selected.address}</div>
-          {Number(selected.amount_owed) > 0 && (
-            <div className="text-sm text-red-500 mt-1">⚠️ 目前欠款 ${Number(selected.amount_owed).toLocaleString()}</div>
-          )}
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex justify-between items-start">
+          <div>
+            <div className="font-medium text-gray-800">{selected.name}</div>
+            <div className="text-sm text-gray-600">{selected.phone}　{selected.address}</div>
+            {Number(selected.amount_owed) > 0 && (
+              <div className="text-sm text-red-500 mt-1">⚠️ 目前欠款 ${Number(selected.amount_owed).toLocaleString()}</div>
+            )}
+          </div>
+          <button onClick={reset} className="text-gray-400 text-xl leading-none">×</button>
+        </div>
+      )}
+
+      {/* 新客人資料 */}
+      {isNew && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium text-blue-700">新客人資料</span>
+            <button onClick={reset} className="text-gray-400 text-xl leading-none">×</button>
+          </div>
+          <input
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
+            placeholder="姓名 *"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+          />
+          <input
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
+            placeholder="電話 *"
+            value={newPhone}
+            onChange={e => setNewPhone(e.target.value)}
+          />
+          <input
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
+            placeholder="地址 *"
+            value={newAddress}
+            onChange={e => setNewAddress(e.target.value)}
+          />
         </div>
       )}
 
@@ -144,41 +216,41 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">桶數</label>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setQuantity(q => Math.max(1, q - 1))}
-            className="w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 text-xl font-bold transition"
-          >−</button>
+          <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-12 h-12 rounded-full bg-gray-200 hover:bg-gray-300 text-xl font-bold transition">−</button>
           <span className="text-3xl font-bold text-gray-800 w-12 text-center">{quantity}</span>
-          <button
-            onClick={() => setQuantity(q => q + 1)}
-            className="w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-xl font-bold transition"
-          >+</button>
+          <button onClick={() => setQuantity(q => q + 1)} className="w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-xl font-bold transition">+</button>
         </div>
       </div>
 
-      {/* 單價 */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">單價（元）</label>
-        <input
-          type="number"
-          className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          value={unitPrice}
-          onChange={e => setUnitPrice(Number(e.target.value))}
-        />
+      {/* 單價 + 樓梯費 */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">單價（元/桶）</label>
+          <input
+            type="number"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+            value={unitPrice}
+            onChange={e => setUnitPrice(Number(e.target.value))}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">樓梯費（元）</label>
+          <input
+            type="number"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+            value={stairFee || ''}
+            placeholder="0"
+            onChange={e => setStairFee(Number(e.target.value) || 0)}
+          />
+        </div>
       </div>
 
       {/* 付款方式 */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">付款方式</label>
         <div className="flex gap-3">
-          <button
-            onClick={() => setPaymentType('CASH')}
-            className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-          >💵 現金</button>
-          <button
-            onClick={() => setPaymentType('AR')}
-            className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'AR' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-          >📒 欠帳</button>
+          <button onClick={() => setPaymentType('CASH')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>💵 現金</button>
+          <button onClick={() => setPaymentType('AR')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'AR' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>📒 欠帳</button>
         </div>
       </div>
 
@@ -194,15 +266,27 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       </div>
 
       {/* 合計 */}
-      <div className="bg-gray-50 rounded-xl p-4 flex justify-between items-center">
-        <span className="text-gray-600 font-medium">合計金額</span>
-        <span className="text-2xl font-bold text-orange-600">${total.toLocaleString()}</span>
+      <div className="bg-gray-50 rounded-xl p-4 space-y-1">
+        <div className="flex justify-between text-sm text-gray-500">
+          <span>瓦斯費</span>
+          <span>${(quantity * unitPrice).toLocaleString()}</span>
+        </div>
+        {stairFee > 0 && (
+          <div className="flex justify-between text-sm text-gray-500">
+            <span>樓梯費</span>
+            <span>${stairFee.toLocaleString()}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-center pt-1 border-t border-gray-200">
+          <span className="text-gray-600 font-medium">合計金額</span>
+          <span className="text-2xl font-bold text-orange-600">${total.toLocaleString()}</span>
+        </div>
       </div>
 
       {/* 送出 */}
       <button
         onClick={handleSubmit}
-        disabled={loading || !selected}
+        disabled={loading || (!selected && !isNew)}
         className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition"
       >
         {loading ? '建單中...' : '✅ 建立訂單'}
