@@ -16,6 +16,23 @@ const METHOD_LABELS: Record<string, string> = {
   CASH: '現金', TRANSFER: '轉帳', LINE_PAY: 'LINE Pay',
 }
 
+function getOverdueLevel(lastPayment: string | null, lastDelivery?: string): 'normal' | 'warning' | 'danger' {
+  const ref = lastPayment || lastDelivery
+  if (!ref) return 'normal'
+  const days = Math.floor((Date.now() - new Date(ref).getTime()) / (1000 * 60 * 60 * 24))
+  if (days >= 45) return 'danger'
+  if (days >= 30) return 'warning'
+  return 'normal'
+}
+
+function getOverdueBadge(lastPayment: string | null): string | null {
+  if (!lastPayment) return '從未收款'
+  const days = Math.floor((Date.now() - new Date(lastPayment).getTime()) / (1000 * 60 * 60 * 24))
+  if (days >= 45) return `${days}天未收款`
+  if (days >= 30) return `${days}天未收款`
+  return null
+}
+
 function getMonthOptions() {
   const options = []
   const now = new Date()
@@ -307,24 +324,38 @@ export default function ArPage() {
 
       {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
 
-      {!loading && balances.map(b => (
-        <div key={b.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm cursor-pointer hover:border-orange-300 transition" onClick={() => openDetail(b)}>
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="font-bold text-gray-800">{b.customer_name}</div>
-              <div className="text-sm text-gray-500">{b.customer_phone}</div>
-              <div className="text-sm text-gray-500">{b.customer_address}</div>
-              {b.last_payment && (
-                <div className="text-xs text-gray-400 mt-1">上次還款：{new Date(b.last_payment).toLocaleDateString('zh-TW')}</div>
-              )}
-            </div>
-            <div className="text-right">
-              <div className="text-xl font-bold text-red-600">${Number(b.amount_owed).toLocaleString()}</div>
-              <div className="text-xs text-gray-400">{b.cylinders_owed} 桶</div>
+      {!loading && balances.map(b => {
+        const level = getOverdueLevel(b.last_payment)
+        const badge = getOverdueBadge(b.last_payment)
+        const borderClass = level === 'danger' ? 'border-red-400 bg-red-50' : level === 'warning' ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-white'
+        return (
+          <div key={b.id} className={`border rounded-xl p-4 shadow-sm cursor-pointer transition hover:opacity-90 ${borderClass}`} onClick={() => openDetail(b)}>
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-800">{b.customer_name}</span>
+                  {badge && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${level === 'danger' ? 'bg-red-500 text-white' : 'bg-orange-400 text-white'}`}>
+                      ⚠️ {badge}
+                    </span>
+                  )}
+                </div>
+                <div className="text-sm text-gray-500">{b.customer_phone}</div>
+                <div className="text-sm text-gray-500">{b.customer_address}</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {b.last_payment ? `上次收款：${new Date(b.last_payment).toLocaleDateString('zh-TW')}` : '尚未收款'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className={`text-xl font-bold ${level === 'danger' ? 'text-red-600' : level === 'warning' ? 'text-orange-500' : 'text-red-600'}`}>
+                  ${Number(b.amount_owed).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400">{b.cylinders_owed} 桶</div>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       {!loading && balances.length === 0 && (
         <div className="text-center text-gray-400 py-12">目前沒有欠帳客戶 🎉</div>
