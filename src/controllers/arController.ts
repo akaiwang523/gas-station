@@ -29,8 +29,10 @@ export async function listArBalances(req: Request, res: Response) {
         SUM(o.quantity) as month_cylinders
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
+       JOIN ar_balances a ON a.customer_id = o.customer_id
        WHERE o.payment_type = 'AR'
          AND DATE_FORMAT(o.created_at, '%Y-%m') = ?
+         AND a.amount_owed > 0
        GROUP BY o.customer_id, c.name, c.phone, c.address
        ORDER BY month_amount DESC`,
       [month]
