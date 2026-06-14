@@ -163,28 +163,24 @@ export async function receivePayment(req: Request, res: Response) {
     return res.status(400).json({ error: '金額有誤' })
   }
 
+  // 找最舊的 AR 訂單來掛收款記錄
   const [orderRows] = await db.query(
     `SELECT id FROM orders WHERE customer_id = ? AND payment_type = 'AR'
      ORDER BY created_at ASC LIMIT 1`,
     [customerId]
   ) as any
 
-  let orderId = orderRows[0]?.id
-  if (!orderId) {
-    const [latestRows] = await db.query(
-      `SELECT id FROM orders WHERE customer_id = ? AND payment_type = 'AR'
-       ORDER BY created_at DESC LIMIT 1`,
-      [customerId]
-    ) as any
-    orderId = latestRows[0]?.id
+  const orderId = orderRows[0]?.id
+
+  if (orderId) {
+    // 有訂單就掛收款記錄
+    await db.query(
+      `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
+      [orderId, collectedBy, amount, method, note || null]
+    )
   }
-  if (!orderId) return res.status(400).json({ error: '找不到欠帳訂單' })
 
-  await db.query(
-    `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
-    [orderId, collectedBy, amount, method, note || null]
-  )
-
+  // 直接更新 ar_balances（不管有沒有訂單都執行）
   await db.query(
     `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
     [amount, customerId]
