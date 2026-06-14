@@ -106,6 +106,23 @@ export default function ArPage() {
     window.print()
   }
 
+  const [monthFilter, setMonthFilter] = useState('')
+  const [monthData, setMonthData] = useState<any[]>([])
+  const [monthTotal, setMonthTotal] = useState(0)
+  const [monthLoading, setMonthLoading] = useState(false)
+
+  async function loadMonth(month: string) {
+    if (!month) { setMonthData([]); setMonthTotal(0); return }
+    setMonthLoading(true)
+    try {
+      const res = await api.getArBalances(undefined, month)
+      setMonthData(res.monthBalances || [])
+      setMonthTotal((res.monthBalances || []).reduce((s: number, b: any) => s + Number(b.month_amount), 0))
+    } finally {
+      setMonthLoading(false)
+    }
+  }
+
   const totalOwed = balances.reduce((s, b) => s + Number(b.amount_owed), 0)
 
   // 對帳單視圖
@@ -306,11 +323,66 @@ export default function ArPage() {
     <div className="max-w-lg mx-auto p-4 space-y-4">
       <h2 className="text-xl font-bold text-gray-800">📒 欠帳管理</h2>
 
+      {/* 累計欠款總覽 */}
       <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center">
         <span className="text-gray-600 font-medium">應收帳款總計</span>
         <span className="text-2xl font-bold text-red-600">${totalOwed.toLocaleString()}</span>
       </div>
 
+      {/* 月份查詢 */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+        <div className="text-sm font-medium text-gray-700">📅 按月查詢應收</div>
+        <div className="flex gap-2 flex-wrap">
+          {monthOptions.map(m => (
+            <button
+              key={m.value}
+              onClick={() => { setMonthFilter(m.value); loadMonth(m.value) }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilter === m.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+          {monthFilter && (
+            <button onClick={() => { setMonthFilter(''); setMonthData([]); setMonthTotal(0) }} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-600">
+              清除
+            </button>
+          )}
+        </div>
+
+        {monthFilter && (
+          <div>
+            {monthLoading ? (
+              <div className="text-center text-gray-400 py-4">載入中...</div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center bg-orange-50 rounded-xl p-3">
+                  <span className="text-sm font-medium text-gray-700">{monthOptions.find(m => m.value === monthFilter)?.label} 應收總額</span>
+                  <span className="text-xl font-bold text-orange-600">${monthTotal.toLocaleString()}</span>
+                </div>
+                {monthData.length === 0 ? (
+                  <div className="text-center text-gray-400 py-3 text-sm">該月無欠帳記錄</div>
+                ) : (
+                  monthData.map((b: any) => (
+                    <div key={b.customer_id} className="flex justify-between items-center bg-gray-50 rounded-xl p-3 cursor-pointer hover:bg-orange-50 transition"
+                      onClick={() => { const bal = balances.find(x => x.customer_id === b.customer_id); if (bal) openDetail(bal) }}>
+                      <div>
+                        <div className="font-medium text-gray-800">{b.customer_name}</div>
+                        <div className="text-xs text-gray-500">{b.customer_phone} · {b.month_cylinders} 桶</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-red-600">${Number(b.month_amount).toLocaleString()}</div>
+                        <div className="text-xs text-gray-400">該月送貨</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 搜尋 */}
       <div className="flex gap-2">
         <input
           className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
