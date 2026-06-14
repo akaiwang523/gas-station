@@ -16,10 +16,9 @@ const METHOD_LABELS: Record<string, string> = {
   CASH: '現金', TRANSFER: '轉帳', LINE_PAY: 'LINE Pay',
 }
 
-function getOverdueLevel(lastPayment: string | null, lastDelivery?: string): 'normal' | 'warning' | 'danger' {
-  const ref = lastPayment || lastDelivery
-  if (!ref) return 'normal'
-  const days = Math.floor((Date.now() - new Date(ref).getTime()) / (1000 * 60 * 60 * 24))
+function getOverdueLevel(lastPayment: string | null): 'normal' | 'warning' | 'danger' {
+  if (!lastPayment) return 'warning'
+  const days = Math.floor((Date.now() - new Date(lastPayment).getTime()) / (1000 * 60 * 60 * 24))
   if (days >= 45) return 'danger'
   if (days >= 30) return 'warning'
   return 'normal'
@@ -28,7 +27,6 @@ function getOverdueLevel(lastPayment: string | null, lastDelivery?: string): 'no
 function getOverdueBadge(lastPayment: string | null): string | null {
   if (!lastPayment) return '從未收款'
   const days = Math.floor((Date.now() - new Date(lastPayment).getTime()) / (1000 * 60 * 60 * 24))
-  if (days >= 45) return `${days}天未收款`
   if (days >= 30) return `${days}天未收款`
   return null
 }
@@ -58,7 +56,9 @@ export default function ArPage() {
   const [payNote, setPayNote] = useState('')
   const [payLoading, setPayLoading] = useState(false)
   const [statement, setStatement] = useState<any>(null)
-  const [_stmtMonth, setStmtMonth] = useState('')
+  const [monthFilter, setMonthFilter] = useState('')
+  const [monthData, setMonthData] = useState<any[]>([])
+  const [monthLoading, setMonthLoading] = useState(false)
   const monthOptions = getMonthOptions()
 
   async function load() {
@@ -68,6 +68,16 @@ export default function ArPage() {
       setBalances(res.balances)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadMonth(month: string) {
+    setMonthLoading(true)
+    try {
+      const res = await api.getArBalances(undefined, month, tab)
+      setMonthData(res.monthBalances || [])
+    } finally {
+      setMonthLoading(false)
     }
   }
 
@@ -85,7 +95,6 @@ export default function ArPage() {
     if (!selected) return
     const res = await api.getStatement(selected.customer_id, month)
     setStatement(res)
-    setStmtMonth(month || '')
     setView('statement')
   }
 
@@ -98,33 +107,22 @@ export default function ArPage() {
       setView('list')
       setSelected(null)
       setDetail(null)
+      if (monthFilter) loadMonth(monthFilter)
     } finally {
       setPayLoading(false)
     }
   }
 
-  function printStatement() {
-    window.print()
-  }
+  // 月份篩選後的顯示列表
+  const displayBalances = monthFilter
+    ? balances.filter(b => monthData.some(m => m.customer_id === b.customer_id))
+    : balances
 
-  const [monthFilter, setMonthFilter] = useState('')
-  const [monthData, setMonthData] = useState<any[]>([])
-  const [monthTotal, setMonthTotal] = useState(0)
-  const [monthLoading, setMonthLoading] = useState(false)
-
-  async function loadMonth(month: string) {
-    if (!month) { setMonthData([]); setMonthTotal(0); return }
-    setMonthLoading(true)
-    try {
-      const res = await api.getArBalances(undefined, month)
-      setMonthData(res.monthBalances || [])
-      setMonthTotal((res.monthBalances || []).reduce((s: number, b: any) => s + Number(b.month_amount), 0))
-    } finally {
-      setMonthLoading(false)
-    }
-  }
-
-  const totalOwed = balances.reduce((s, b) => s + Number(b.amount_owed), 0)
+  // 總計：有月份篩選時顯示該月應收，否則顯示全部欠款
+  const monthTotal = monthData.reduce((s, b) => s + Number(b.month_amount), 0)
+  const totalOwed = monthFilter
+    ? monthTotal
+    : balances.reduce((s, b) => s + Number(b.amount_owed), 0)
 
   // 對帳單視圖
   if (view === 'statement' && statement) {
@@ -134,46 +132,32 @@ export default function ArPage() {
         <div className="print:hidden flex items-center gap-2 mb-4">
           <button onClick={() => setView('detail')} className="text-orange-500 text-sm">← 返回</button>
           <span className="text-gray-400">|</span>
-          <button onClick={printStatement} className="text-sm bg-orange-500 text-white px-3 py-1.5 rounded-lg">🖨 列印 / 存PDF</button>
+          <button onClick={() => window.print()} className="text-sm bg-orange-500 text-white px-3 py-1.5 rounded-lg">🖨 列印 / 存PDF</button>
         </div>
-
-        {/* 對帳單內容 */}
-        <div id="statement-content" className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
           <div className="text-center border-b border-gray-200 pb-4">
             <h1 className="text-xl font-bold text-gray-800">榮泰行 瓦斯對帳單</h1>
-            <p className="text-sm text-gray-500 mt-1">{summary.month ? monthOptions.find(m => m.value === summary.month)?.label || summary.month : '全部'}</p>
+            <p className="text-sm text-gray-500 mt-1">{summary.month ? monthOptions.find(m => m.value === summary.month)?.label : '全部'}</p>
           </div>
-
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div><span className="text-gray-500">客戶：</span><span className="font-medium">{customer.name}</span></div>
             <div><span className="text-gray-500">電話：</span><span>{customer.phone}</span></div>
             <div className="col-span-2"><span className="text-gray-500">地址：</span><span>{customer.address}</span></div>
             <div><span className="text-gray-500">列印日期：</span><span>{new Date().toLocaleDateString('zh-TW')}</span></div>
           </div>
-
-          {/* 送貨明細 */}
           <div>
             <div className="text-sm font-medium text-gray-700 mb-2">送貨記錄</div>
             <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="text-left p-2 border border-gray-200">日期</th>
-                  <th className="text-left p-2 border border-gray-200">品項</th>
-                  <th className="text-right p-2 border border-gray-200">金額</th>
-                </tr>
-              </thead>
+              <thead><tr className="bg-gray-50">
+                <th className="text-left p-2 border border-gray-200">日期</th>
+                <th className="text-left p-2 border border-gray-200">品項</th>
+                <th className="text-right p-2 border border-gray-200">金額</th>
+              </tr></thead>
               <tbody>
                 {orders.map((o: any, i: number) => (
                   <tr key={i}>
                     <td className="p-2 border border-gray-200">{new Date(o.created_at).toLocaleDateString('zh-TW')}</td>
-                    <td className="p-2 border border-gray-200">
-                      {o.items_str ? o.items_str.split(',').map((item: string) => {
-                        const [typeQtyPrice] = item.split('@')
-                        const [typeQty] = typeQtyPrice.split('x')
-                        return typeQty
-                      }).join('、') : `${o.quantity}桶`}
-                      {o.note ? ` (${o.note})` : ''}
-                    </td>
+                    <td className="p-2 border border-gray-200">{o.quantity}桶{o.note ? ` (${o.note})` : ''}</td>
                     <td className="p-2 border border-gray-200 text-right">${Number(o.total_amount).toLocaleString()}</td>
                   </tr>
                 ))}
@@ -184,19 +168,15 @@ export default function ArPage() {
               </tbody>
             </table>
           </div>
-
-          {/* 收款記錄 */}
           {payments.length > 0 && (
             <div>
               <div className="text-sm font-medium text-gray-700 mb-2">收款記錄</div>
               <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left p-2 border border-gray-200">日期</th>
-                    <th className="text-left p-2 border border-gray-200">方式</th>
-                    <th className="text-right p-2 border border-gray-200">金額</th>
-                  </tr>
-                </thead>
+                <thead><tr className="bg-gray-50">
+                  <th className="text-left p-2 border border-gray-200">日期</th>
+                  <th className="text-left p-2 border border-gray-200">方式</th>
+                  <th className="text-right p-2 border border-gray-200">金額</th>
+                </tr></thead>
                 <tbody>
                   {payments.map((p: any, i: number) => (
                     <tr key={i}>
@@ -213,18 +193,13 @@ export default function ArPage() {
               </table>
             </div>
           )}
-
-          {/* 總計 */}
           <div className="border-t-2 border-gray-800 pt-3">
             <div className="flex justify-between text-lg font-bold">
               <span>尚欠金額</span>
               <span className="text-red-600">${Number(summary.balance).toLocaleString()}</span>
             </div>
           </div>
-
-          <div className="text-center text-xs text-gray-400 pt-2 border-t border-gray-100">
-            如有疑問請聯繫 榮泰行
-          </div>
+          <div className="text-center text-xs text-gray-400 pt-2 border-t border-gray-100">如有疑問請聯繫 榮泰行</div>
         </div>
       </div>
     )
@@ -235,7 +210,6 @@ export default function ArPage() {
     return (
       <div className="max-w-lg mx-auto p-4 space-y-4">
         <button onClick={() => { setView('list'); setSelected(null); setDetail(null) }} className="text-orange-500 text-sm">← 返回列表</button>
-
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex justify-between items-start">
             <div>
@@ -250,7 +224,6 @@ export default function ArPage() {
           </div>
         </div>
 
-        {/* 收款區 */}
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-3">
           <div className="text-sm font-medium text-orange-700">收款</div>
           <input type="number" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-xl font-bold focus:outline-none focus:ring-2 focus:ring-orange-400" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
@@ -261,28 +234,22 @@ export default function ArPage() {
               </button>
             ))}
           </div>
-          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="備註（選填）" value={payNote} onChange={e => setPayNote(e.target.value)} />
+          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none" placeholder="備註（選填）" value={payNote} onChange={e => setPayNote(e.target.value)} />
           <button onClick={handlePay} disabled={payLoading || !payAmount} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl transition">
             {payLoading ? '處理中...' : '✅ 確認收款'}
           </button>
         </div>
 
-        {/* 對帳單按鈕 */}
         <div className="space-y-2">
           <div className="text-sm font-medium text-gray-700">產生對帳單</div>
           <div className="flex gap-2 flex-wrap">
             {monthOptions.map(m => (
-              <button key={m.value} onClick={() => openStatement(m.value)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm rounded-lg transition">
-                {m.label}
-              </button>
+              <button key={m.value} onClick={() => openStatement(m.value)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm rounded-lg transition">{m.label}</button>
             ))}
-            <button onClick={() => openStatement()} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm rounded-lg transition">
-              全部
-            </button>
+            <button onClick={() => openStatement()} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm rounded-lg transition">全部</button>
           </div>
         </div>
 
-        {/* 月份明細 */}
         {detail.monthlyOrders?.length > 0 && (
           <div className="space-y-2">
             <div className="text-sm font-medium text-gray-700">月份明細</div>
@@ -292,15 +259,12 @@ export default function ArPage() {
                   <div className="font-medium text-gray-800">{m.month_label}</div>
                   <div className="text-xs text-gray-500">{m.order_count} 單 · {m.total_cylinders} 桶</div>
                 </div>
-                <div className="text-right">
-                  <div className="font-bold text-gray-800">${Number(m.total_amount).toLocaleString()}</div>
-                </div>
+                <div className="font-bold text-gray-800">${Number(m.total_amount).toLocaleString()}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* 收款記錄 */}
         {detail.payments?.length > 0 && (
           <div className="space-y-2">
             <div className="text-sm font-medium text-gray-700">收款記錄</div>
@@ -324,109 +288,66 @@ export default function ArPage() {
     <div className="max-w-lg mx-auto p-4 space-y-4">
       <h2 className="text-xl font-bold text-gray-800">📒 欠帳管理</h2>
 
-      {/* 累計欠款總覽 */}
-      <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center">
-        <span className="text-gray-600 font-medium">應收帳款總計</span>
-        <span className="text-2xl font-bold text-red-600">${totalOwed.toLocaleString()}</span>
-      </div>
-
-      {/* Tab 切換 */}
+      {/* Tab */}
       <div className="flex bg-gray-100 rounded-xl p-1">
-        <button
-          onClick={() => setTab('unpaid')}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'unpaid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}
-        >
-          未結清 ({balances.length})
+        <button onClick={() => { setTab('unpaid'); setMonthFilter(''); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'unpaid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+          未結清
         </button>
-        <button
-          onClick={() => setTab('paid')}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'paid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}
-        >
+        <button onClick={() => { setTab('paid'); setMonthFilter(''); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'paid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
           已結清
         </button>
       </div>
 
-      {/* 月份查詢 */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-        <div className="text-sm font-medium text-gray-700">📅 按月查詢應收</div>
-        <div className="flex gap-2 flex-wrap">
-          {monthOptions.map(m => (
-            <button
-              key={m.value}
-              onClick={() => { setMonthFilter(m.value); loadMonth(m.value) }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilter === m.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              {m.label}
-            </button>
-          ))}
-          {monthFilter && (
-            <button onClick={() => { setMonthFilter(''); setMonthData([]); setMonthTotal(0) }} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-600">
-              清除
-            </button>
-          )}
-        </div>
-
-        {monthFilter && (
-          <div>
-            {monthLoading ? (
-              <div className="text-center text-gray-400 py-4">載入中...</div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex justify-between items-center bg-orange-50 rounded-xl p-3">
-                  <span className="text-sm font-medium text-gray-700">{monthOptions.find(m => m.value === monthFilter)?.label} 應收總額</span>
-                  <span className="text-xl font-bold text-orange-600">${monthTotal.toLocaleString()}</span>
-                </div>
-                {monthData.length === 0 ? (
-                  <div className="text-center text-gray-400 py-3 text-sm">該月無欠帳記錄</div>
-                ) : (
-                  monthData.map((b: any) => (
-                    <div key={b.customer_id} className="flex justify-between items-center bg-gray-50 rounded-xl p-3 cursor-pointer hover:bg-orange-50 transition"
-                      onClick={() => { const bal = balances.find(x => x.customer_id === b.customer_id); if (bal) openDetail(bal) }}>
-                      <div>
-                        <div className="font-medium text-gray-800">{b.customer_name}</div>
-                        <div className="text-xs text-gray-500">{b.customer_phone} · {b.month_cylinders} 桶</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-red-600">${Number(b.month_amount).toLocaleString()}</div>
-                        <div className="text-xs text-gray-400">該月送貨</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        )}
+      {/* 應收總計 */}
+      <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center">
+        <span className="text-gray-600 font-medium">
+          {monthFilter ? `${monthOptions.find(m => m.value === monthFilter)?.label} 應收` : '應收帳款總計'}
+        </span>
+        <span className="text-2xl font-bold text-red-600">${totalOwed.toLocaleString()}</span>
       </div>
+
+      {/* 月份查詢 */}
+      {tab === 'unpaid' && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+          <div className="text-sm font-medium text-gray-700">📅 按月篩選</div>
+          <div className="flex gap-2 flex-wrap">
+            {monthOptions.map(m => (
+              <button key={m.value} onClick={() => {
+                const newMonth = monthFilter === m.value ? '' : m.value
+                setMonthFilter(newMonth)
+                if (newMonth) loadMonth(newMonth)
+                else setMonthData([])
+              }} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilter === m.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {monthFilter && monthLoading && <div className="text-center text-gray-400 text-sm py-2">載入中...</div>}
+        </div>
+      )}
 
       {/* 搜尋 */}
       <div className="flex gap-2">
-        <input
-          className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          placeholder="搜尋客戶..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && load()}
-        />
+        <input className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="搜尋客戶..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} />
         <button onClick={load} className="px-4 py-2.5 bg-orange-500 text-white rounded-xl font-medium">搜尋</button>
       </div>
 
       {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
 
-      {!loading && balances.map(b => {
+      {/* 客戶列表 */}
+      {!loading && displayBalances.map(b => {
         const level = getOverdueLevel(b.last_payment)
         const badge = getOverdueBadge(b.last_payment)
         const borderClass = level === 'danger' ? 'border-red-400 bg-red-50' : level === 'warning' ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-white'
+        const monthInfo = monthData.find(m => m.customer_id === b.customer_id)
         return (
           <div key={b.id} className={`border rounded-xl p-4 shadow-sm cursor-pointer transition hover:opacity-90 ${borderClass}`} onClick={() => openDetail(b)}>
             <div className="flex justify-between items-start">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-gray-800">{b.customer_name}</span>
-                  {badge && (
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${level === 'danger' ? 'bg-red-500 text-white' : 'bg-orange-400 text-white'}`}>
-                      ⚠️ {badge}
-                    </span>
+                  {badge && tab === 'unpaid' && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${level === 'danger' ? 'bg-red-500 text-white' : 'bg-orange-400 text-white'}`}>⚠️ {badge}</span>
                   )}
                 </div>
                 <div className="text-sm text-gray-500">{b.customer_phone}</div>
@@ -434,20 +355,25 @@ export default function ArPage() {
                 <div className="text-xs text-gray-400 mt-1">
                   {b.last_payment ? `上次收款：${new Date(b.last_payment).toLocaleDateString('zh-TW')}` : '尚未收款'}
                 </div>
+                {monthInfo && (
+                  <div className="text-xs text-orange-600 mt-1">本月送貨：{monthInfo.month_cylinders} 桶</div>
+                )}
               </div>
               <div className="text-right">
-                <div className={`text-xl font-bold ${level === 'danger' ? 'text-red-600' : level === 'warning' ? 'text-orange-500' : 'text-red-600'}`}>
-                  ${Number(b.amount_owed).toLocaleString()}
+                <div className={`text-xl font-bold ${level === 'danger' ? 'text-red-600' : 'text-red-500'}`}>
+                  ${Number(monthFilter && monthInfo ? monthInfo.month_amount : b.amount_owed).toLocaleString()}
                 </div>
-                <div className="text-xs text-gray-400">{b.cylinders_owed} 桶</div>
+                <div className="text-xs text-gray-400">{monthFilter && monthInfo ? '本月' : '累計'}</div>
               </div>
             </div>
           </div>
         )
       })}
 
-      {!loading && balances.length === 0 && (
-        <div className="text-center text-gray-400 py-12">目前沒有欠帳客戶 🎉</div>
+      {!loading && displayBalances.length === 0 && (
+        <div className="text-center text-gray-400 py-12">
+          {tab === 'paid' ? '目前沒有已結清客戶' : monthFilter ? '該月無欠帳記錄' : '目前沒有欠帳客戶 🎉'}
+        </div>
       )}
     </div>
   )
