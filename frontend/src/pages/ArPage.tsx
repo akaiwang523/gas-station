@@ -81,7 +81,11 @@ export default function ArPage() {
     }
   }
 
-  useEffect(() => { load(tab) }, [tab])
+  useEffect(() => { 
+    load(tab)
+    setMonthFilter('')
+    setMonthData([])
+  }, [tab])
 
   async function openDetail(b: Balance) {
     setSelected(b)
@@ -114,12 +118,20 @@ export default function ArPage() {
   }
 
   // 月份篩選後的顯示列表
-  const displayBalances = monthFilter
-    ? balances.filter(b => monthData.some(m => m.customer_id === b.customer_id))
-    : balances
+  // 有月份篩選時直接用 monthData，沒有時用 balances
+  const displayBalances = monthFilter ? monthData.map((m: any) => ({
+    id: m.customer_id,
+    customer_id: m.customer_id,
+    customer_name: m.customer_name,
+    customer_phone: m.customer_phone,
+    customer_address: m.customer_address,
+    amount_owed: m.month_amount,
+    cylinders_owed: m.month_cylinders,
+    last_payment: balances.find(b => b.customer_id === m.customer_id)?.last_payment || null,
+  })) : balances
 
   // 總計：有月份篩選時顯示該月應收，否則顯示全部欠款
-  const monthTotal = monthData.reduce((s, b) => s + Number(b.month_amount), 0)
+  const monthTotal = monthData.reduce((s: number, b: any) => s + Number(b.month_amount), 0)
   const totalOwed = monthFilter
     ? monthTotal
     : balances.reduce((s, b) => s + Number(b.amount_owed), 0)
