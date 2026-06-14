@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>瓦斯行管理系統</title>
+    <style>
+      @media print {
+        .print\:hidden { display: none !important; }
+        body { background: white; }
+        #root > div > div:first-child { display: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -1,9 +1,9 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
-// 取得欠帳客戶列表
+// 欠帳客戶列表（支援月份篩選）
 export async function listArBalances(req: Request, res: Response) {
-  const { search } = req.query
+  const { search, month } = req.query
   const conditions = ['a.amount_owed > 0']
   const params: any[] = []
 
@@ -20,30 +20,66 @@ export async function listArBalances(req: Request, res: Response) {
      ORDER BY a.amount_owed DESC`,
     params
   ) as any
+
+  // 如果有月份篩選，額外查該月有欠帳的客戶
+  if (month) {
+    const [monthRows] = await db.query(
+      `SELECT DISTINCT o.customer_id, c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+        SUM(o.total_amount) as month_amount,
+        SUM(o.quantity) as month_cylinders
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       WHERE o.payment_type = 'AR'
+         AND DATE_FORMAT(o.created_at, '%Y-%m') = ?
+       GROUP BY o.customer_id, c.name, c.phone, c.address
+       ORDER BY month_amount DESC`,
+      [month]
+    ) as any
+    return res.json({ balances: rows, monthBalances: monthRows, month })
+  }
+
   res.json({ balances: rows })
 }
 
-// 取得單一客戶欠帳明細
+// 客戶欠帳明細（含月份分組）
 export async function getCustomerAr(req: Request, res: Response) {
   const customerId = Number(req.params.customerId)
 
   const [balanceRows] = await db.query(
-    `SELECT a.*, c.name as customer_name, c.phone as customer_phone
+    `SELECT a.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address
      FROM ar_balances a JOIN customers c ON c.id = a.customer_id
      WHERE a.customer_id = ?`,
     [customerId]
   ) as any
 
-  const [orders] = await db.query(
-    `SELECT o.*, 
-      (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.order_id = o.id) as paid_amount
-     FROM orders o
-     WHERE o.customer_id = ? AND o.payment_type = 'AR'
-     ORDER BY o.created_at DESC
-     LIMIT 30`,
+  // 按月份分組的欠帳訂單
+  const [monthlyOrders] = await db.query(
+    `SELECT 
+      DATE_FORMAT(created_at, '%Y-%m') as month,
+      DATE_FORMAT(created_at, '%Y年%m月') as month_label,
+      COUNT(*) as order_count,
+      SUM(quantity) as total_cylinders,
+      SUM(total_amount) as total_amount,
+      SUM(CASE WHEN status = 'DELIVERED' THEN 0 ELSE total_amount END) as unpaid_amount
+     FROM orders
+     WHERE customer_id = ? AND payment_type = 'AR'
+     GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+     ORDER BY month DESC`,
     [customerId]
   ) as any
 
+  // 所有訂單明細
+  const [orders] = await db.query(
+    `SELECT o.*, oi.gas_type, oi.quantity as item_qty, oi.unit_price as item_price, oi.subtotal
+     FROM orders o
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.customer_id = ? AND o.payment_type = 'AR'
+     ORDER BY o.created_at DESC
+     LIMIT 100`,
+    [customerId]
+  ) as any
+
+  // 收款記錄
   const [payments] = await db.query(
     `SELECT p.*, u.name as collector_name
      FROM payments p
@@ -51,14 +87,73 @@ export async function getCustomerAr(req: Request, res: Response) {
      JOIN users u ON u.id = p.collected_by
      WHERE o.customer_id = ?
      ORDER BY p.paid_at DESC
-     LIMIT 20`,
+     LIMIT 30`,
     [customerId]
   ) as any
 
-  res.json({ balance: balanceRows[0] || null, orders, payments })
+  res.json({ balance: balanceRows[0] || null, monthlyOrders, orders, payments })
 }
 
-// 收款（針對客戶整體欠款，不綁定單筆訂單）
+// 產生對帳單
+export async function getStatement(req: Request, res: Response) {
+  const customerId = Number(req.params.customerId)
+  const { month } = req.query
+
+  const [customerRows] = await db.query(
+    `SELECT c.*, a.amount_owed, a.cylinders_owed
+     FROM customers c
+     LEFT JOIN ar_balances a ON a.customer_id = c.id
+     WHERE c.id = ?`,
+    [customerId]
+  ) as any
+  const customer = customerRows[0]
+  if (!customer) return res.status(404).json({ error: '客戶不存在' })
+
+  let orderWhere = 'o.customer_id = ? AND o.payment_type = "AR"'
+  const params: any[] = [customerId]
+  if (month) {
+    orderWhere += ' AND DATE_FORMAT(o.created_at, "%Y-%m") = ?'
+    params.push(month)
+  }
+
+  const [orders] = await db.query(
+    `SELECT o.created_at, o.quantity, o.total_amount, o.status, o.note,
+      GROUP_CONCAT(CONCAT(oi.gas_type,'x',oi.quantity,'@',oi.unit_price) SEPARATOR ',') as items_str
+     FROM orders o
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     WHERE ${orderWhere}
+     GROUP BY o.id
+     ORDER BY o.created_at ASC`,
+    params
+  ) as any
+
+  const [payments] = await db.query(
+    `SELECT p.paid_at, p.amount, p.method, p.note
+     FROM payments p
+     JOIN orders o ON o.id = p.order_id
+     WHERE o.customer_id = ?
+     ${month ? 'AND DATE_FORMAT(p.paid_at, "%Y-%m") = ?' : ''}
+     ORDER BY p.paid_at ASC`,
+    month ? [customerId, month] : [customerId]
+  ) as any
+
+  const totalOrders = orders.reduce((s: number, o: any) => s + Number(o.total_amount), 0)
+  const totalPaid = payments.reduce((s: number, p: any) => s + Number(p.amount), 0)
+
+  res.json({
+    customer,
+    orders,
+    payments,
+    summary: {
+      total_orders: totalOrders,
+      total_paid: totalPaid,
+      balance: Number(customer.amount_owed),
+      month: month || null,
+    }
+  })
+}
+
+// 收款
 export async function receivePayment(req: Request, res: Response) {
   const customerId = Number(req.params.customerId)
   const { amount, method = 'CASH', note } = req.body
@@ -68,16 +163,13 @@ export async function receivePayment(req: Request, res: Response) {
     return res.status(400).json({ error: '金額有誤' })
   }
 
-  // 找最舊未結清的 AR 訂單來掛收款
   const [orderRows] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND payment_type = 'AR' AND status != 'DELIVERED'
+    `SELECT id FROM orders WHERE customer_id = ? AND payment_type = 'AR'
      ORDER BY created_at ASC LIMIT 1`,
     [customerId]
   ) as any
 
   let orderId = orderRows[0]?.id
-
-  // 如果沒有未結清訂單，就掛在最新的 AR 訂單
   if (!orderId) {
     const [latestRows] = await db.query(
       `SELECT id FROM orders WHERE customer_id = ? AND payment_type = 'AR'
@@ -86,7 +178,6 @@ export async function receivePayment(req: Request, res: Response) {
     ) as any
     orderId = latestRows[0]?.id
   }
-
   if (!orderId) return res.status(400).json({ error: '找不到欠帳訂單' })
 
   await db.query(
