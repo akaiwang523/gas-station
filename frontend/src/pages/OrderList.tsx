@@ -28,7 +28,7 @@ const STATUS_COLOR: Record<string, string> = {
   CANCELLED: 'bg-gray-100 text-gray-500',
 }
 const GAS_LABELS: Record<string, string> = {
-  BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_4KG: '4kg',
+  BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_10KG: '10kg', BOTTLED_4KG: '4kg',
 }
 
 export default function OrderList({ refresh }: { refresh?: number }) {
