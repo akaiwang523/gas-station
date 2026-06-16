@@ -5,10 +5,10 @@ RUN apt-get update && apt-get install -y openssl libssl-dev && rm -rf /var/lib/a
 WORKDIR /src
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
 COPY . .
 
 EXPOSE 8080
 
-CMD ["npm", "start"]
+CMD ["npx", "tsx", "src/index.ts"]
