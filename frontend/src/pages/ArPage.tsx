@@ -57,6 +57,7 @@ export default function ArPage() {
   const [payLoading, setPayLoading] = useState(false)
   const [statement, setStatement] = useState<any>(null)
   const [monthFilter, setMonthFilter] = useState('')
+  const [monthSummary, setMonthSummary] = useState<any>(null)
   const [monthData, setMonthData] = useState<any[]>([])
   const [monthLoading, setMonthLoading] = useState(false)
   const monthOptions = getMonthOptions()
@@ -69,6 +70,13 @@ export default function ArPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadMonthSummary(month: string) {
+    try {
+      const res = await api.getMonthSummary(month)
+      setMonthSummary(res)
+    } catch {}
   }
 
   async function loadMonth(month: string) {
@@ -268,12 +276,38 @@ export default function ArPage() {
           <div className="space-y-2">
             <div className="text-sm font-medium text-gray-700">月份明細</div>
             {detail.monthlyOrders.map((m: any) => (
-              <div key={m.month} className="bg-white border border-gray-200 rounded-xl p-3 flex justify-between items-center">
-                <div>
+              <div key={m.month} className="bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex justify-between items-center mb-2">
                   <div className="font-medium text-gray-800">{m.month_label}</div>
-                  <div className="text-xs text-gray-500">{m.order_count} 單 · {m.total_cylinders} 桶</div>
+                  <div className="font-bold text-orange-600">${Number(m.total_amount).toLocaleString()}</div>
                 </div>
-                <div className="font-bold text-gray-800">${Number(m.total_amount).toLocaleString()}</div>
+                <div className="text-xs text-gray-500">{m.order_count} 筆訂單 · {m.total_cylinders} 桶</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 訂單明細 */}
+        {detail.orders?.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-gray-700">欠帳訂單記錄</div>
+            {detail.orders.filter((v: any, i: number, a: any[]) => a.findIndex((t: any) => t.id === v.id) === i).map((o: any) => (
+              <div key={o.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">{new Date(o.created_at).toLocaleDateString('zh-TW')}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {o.gas_type ? `${o.gas_type.replace('BOTTLED_','').replace('KG','kg')} × ${o.item_qty} 桶` : `${o.quantity} 桶`}
+                      {o.note ? ` · ${o.note}` : ''}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-gray-800">${Number(o.total_amount).toLocaleString()}</div>
+                    <div className={`text-xs mt-0.5 ${o.status === 'DELIVERED' ? 'text-green-500' : 'text-orange-500'}`}>
+                      {o.status === 'DELIVERED' ? '已送達' : '待送'}
+                    </div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -329,14 +363,32 @@ export default function ArPage() {
               <button key={m.value} onClick={() => {
                 const newMonth = monthFilter === m.value ? '' : m.value
                 setMonthFilter(newMonth)
-                if (newMonth) loadMonth(newMonth)
-                else setMonthData([])
+                if (newMonth) { loadMonth(newMonth); loadMonthSummary(newMonth) }
+                else { setMonthData([]); setMonthSummary(null) }
               }} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilter === m.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                 {m.label}
               </button>
             ))}
           </div>
           {monthFilter && monthLoading && <div className="text-center text-gray-400 text-sm py-2">載入中...</div>}
+
+          {/* 月份收款摘要 */}
+          {monthFilter && monthSummary && !monthLoading && (
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <div className="bg-gray-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-gray-800">{monthSummary.total_customers}</div>
+                <div className="text-xs text-gray-500 mt-0.5">應收間數</div>
+              </div>
+              <div className="bg-red-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-red-600">{monthSummary.pending_customers}</div>
+                <div className="text-xs text-gray-500 mt-0.5">待收間數</div>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-green-600">{monthSummary.paid_customers}</div>
+                <div className="text-xs text-gray-500 mt-0.5">已收間數</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

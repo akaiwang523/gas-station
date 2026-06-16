@@ -68,6 +68,7 @@ export const api = {
     request(`/orders/${orderId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
 
   // AR
+  getMonthSummary: (month: string) => request(`/ar/month-summary?month=${month}`),
   getArBalances: (search?: string, month?: string, tab?: string) => {
     const q = new URLSearchParams()
     if (search) q.set('search', search)

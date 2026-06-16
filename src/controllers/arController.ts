@@ -43,6 +43,45 @@ export async function listArBalances(req: Request, res: Response) {
   res.json({ balances: rows })
 }
 
+// 月份收款摘要
+export async function getMonthSummary(req: Request, res: Response) {
+  const { month } = req.query
+  const targetMonth = month || new Date().toISOString().slice(0, 7)
+
+  // 該月有送貨的欠帳客戶
+  const [total] = await db.query(
+    `SELECT COUNT(DISTINCT o.customer_id) as total
+     FROM orders o
+     WHERE o.payment_type = 'AR' AND DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'`,
+    [targetMonth]
+  ) as any
+
+  // 該月有送貨且已收款（本月有收款記錄）的客戶
+  const [paid] = await db.query(
+    `SELECT COUNT(DISTINCT o.customer_id) as paid
+     FROM orders o
+     JOIN payments p ON p.order_id = o.id
+     WHERE o.payment_type = 'AR' AND DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'`,
+    [targetMonth]
+  ) as any
+
+  // 該月欠帳總額
+  const [amount] = await db.query(
+    `SELECT SUM(o.total_amount) as total_amount
+     FROM orders o
+     WHERE o.payment_type = 'AR' AND DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'`,
+    [targetMonth]
+  ) as any
+
+  res.json({
+    month: targetMonth,
+    total_customers: Number(total[0].total || 0),
+    paid_customers: Number(paid[0].paid || 0),
+    pending_customers: Number(total[0].total || 0) - Number(paid[0].paid || 0),
+    total_amount: Number(amount[0].total_amount || 0),
+  })
+}
+
 // 客戶欠帳明細（含月份分組）
 export async function getCustomerAr(req: Request, res: Response) {
   const customerId = Number(req.params.customerId)
