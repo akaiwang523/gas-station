@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 
 type Order = {
   id: number
+  customer_id: number
   customer_name: string
   customer_phone: string
   customer_address: string
@@ -32,6 +33,7 @@ const GAS_LABELS: Record<string, string> = {
 
 export default function OrderList({ refresh }: { refresh?: number }) {
   const [orders, setOrders] = useState<Order[]>([])
+  const [returnsMap, setReturnsMap] = useState<Record<number, any[]>>({})
   const [summary, setSummary] = useState<any>(null)
   const [filter, setFilter] = useState('ALL')
   const [loading, setLoading] = useState(true)
@@ -45,6 +47,16 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
       setOrders(res.orders)
       setSummary(sum)
+      // 查各訂單客戶的待處理存氣
+      const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
+      const map: Record<number, any[]> = {}
+      await Promise.all(customerIds.map(async (cid: any) => {
+        try {
+          const r = await api.getPendingReturns(cid)
+          if (r.returns?.length > 0) map[cid] = r.returns
+        } catch {}
+      }))
+      setReturnsMap(map)
     } finally {
       setLoading(false)
     }
@@ -150,6 +162,12 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 </span>
               </div>
               {order.note && <div className="text-sm text-orange-600 mb-2">📝 {order.note}</div>}
+              {returnsMap[order.customer_id]?.map((r: any) => (
+                <div key={r.id} className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 mb-2">
+                  ⚠️ 存氣 {r.remaining_kg}kg
+                  {Number(r.amount) > 0 && <span className="ml-1 text-yellow-700 font-medium">· {r.action === 'REFUND' ? '退費' : '抵扣'} ${Number(r.amount).toLocaleString()}</span>}
+                </div>
+              ))}
               <div className="flex gap-2 mt-3">
                 {order.status === 'PENDING' && (
                   <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
