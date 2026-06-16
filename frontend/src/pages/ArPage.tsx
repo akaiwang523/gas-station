@@ -407,29 +407,16 @@ export default function ArPage() {
         const borderClass = level === 'danger' ? 'border-red-400 bg-red-50' : level === 'warning' ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-white'
         const monthInfo = monthData.find(m => m.customer_id === b.customer_id)
         return (
-          <div key={b.id} className={`border rounded-xl p-4 shadow-sm cursor-pointer transition hover:opacity-90 ${borderClass}`} onClick={() => openDetail(b)}>
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-gray-800">{b.customer_name}</span>
-                  {badge && tab === 'unpaid' && (
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${level === 'danger' ? 'bg-red-500 text-white' : 'bg-orange-400 text-white'}`}>⚠️ {badge}</span>
-                  )}
-                </div>
-                <div className="text-sm text-gray-500">{b.customer_phone}</div>
-                <div className="text-sm text-gray-500">{b.customer_address}</div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {b.last_payment ? `上次收款：${new Date(b.last_payment).toLocaleDateString('zh-TW')}` : '尚未收款'}
-                </div>
-                {monthInfo && (
-                  <div className="text-xs text-orange-600 mt-1">本月送貨：{monthInfo.month_cylinders} 桶</div>
+          <div key={b.id} className={`border rounded-xl px-4 py-3 cursor-pointer transition hover:opacity-90 ${borderClass}`} onClick={() => openDetail(b)}>
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-gray-800">{b.customer_name}</span>
+                {badge && tab === 'unpaid' && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${level === 'danger' ? 'bg-red-500 text-white' : 'bg-orange-400 text-white'}`}>⚠️</span>
                 )}
               </div>
-              <div className="text-right">
-                <div className={`text-xl font-bold ${level === 'danger' ? 'text-red-600' : 'text-red-500'}`}>
-                  ${Number(monthFilter && monthInfo ? monthInfo.month_amount : b.amount_owed).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-400">{monthFilter && monthInfo ? '本月' : '累計'}</div>
+              <div className={`font-bold ${level === 'danger' ? 'text-red-600' : 'text-red-500'}`}>
+                ${Number(monthFilter && monthInfo ? monthInfo.month_amount : b.amount_owed).toLocaleString()}
               </div>
             </div>
           </div>
