@@ -18,15 +18,24 @@ type Item = {
   unit_price: number
 }
 
+const GAS_OPTIONS = [
+  { type: 'BOTTLED_20KG', label: '20kg', defaultPrice: 800 },
+  { type: 'BOTTLED_16KG', label: '16kg', defaultPrice: 650 },
+  { type: 'BOTTLED_10KG', label: '10kg', defaultPrice: 450 },
+  { type: 'BOTTLED_4KG',  label: '4kg',  defaultPrice: 200 },
+]
+
 const GAS_LABELS: Record<string, string> = {
   BOTTLED_20KG: '20kg 桶',
   BOTTLED_16KG: '16kg 桶',
+  BOTTLED_10KG: '10kg 桶',
   BOTTLED_4KG: '4kg 桶',
 }
 
 const GAS_DEFAULT_PRICE: Record<string, number> = {
   BOTTLED_20KG: 800,
   BOTTLED_16KG: 650,
+  BOTTLED_10KG: 450,
   BOTTLED_4KG: 200,
 }
 
@@ -250,28 +259,51 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         <label className="block text-sm font-medium text-gray-700 mb-2">品項</label>
         <div className="space-y-3">
           {items.map((item, idx) => (
-            <div key={idx} className="bg-gray-50 rounded-xl p-3 space-y-2">
+            <div key={idx} className="bg-gray-50 rounded-xl p-3 space-y-3">
+              {/* 規格快選 */}
               <div className="flex justify-between items-center">
-                <select
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"
-                  value={item.gas_type}
-                  onChange={e => updateItem(idx, 'gas_type', e.target.value)}
-                >
-                  {Object.entries(GAS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-                {items.length > 1 && <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold">×</button>}
+                <div className="flex gap-2 flex-wrap">
+                  {GAS_OPTIONS.map(opt => (
+                    <button
+                      key={opt.type}
+                      onClick={() => updateItem(idx, 'gas_type', opt.type)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${item.gas_type === opt.type ? 'bg-orange-500 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:border-orange-400'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {items.length > 1 && (
+                  <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold ml-2">×</button>
+                )}
               </div>
-              <div className="flex gap-3 items-center">
+
+              {/* 桶數 + 單價 */}
+              <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <button onClick={() => updateItem(idx, 'quantity', Math.max(1, item.quantity - 1))} className="w-9 h-9 rounded-full bg-gray-200 hover:bg-gray-300 text-lg font-bold transition">−</button>
                   <span className="text-xl font-bold text-gray-800 w-8 text-center">{item.quantity}</span>
                   <button onClick={() => updateItem(idx, 'quantity', item.quantity + 1)} className="w-9 h-9 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-lg font-bold transition">+</button>
                 </div>
-                <div className="flex items-center gap-1 flex-1">
-                  <span className="text-sm text-gray-500">單價</span>
-                  <input type="number" className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))} />
+                <span className="text-gray-400 text-sm">×</span>
+                {/* 單價快選 */}
+                <div className="flex-1">
+                  <div className="flex gap-1.5 flex-wrap mb-1.5">
+                    {[item.unit_price - 50, item.unit_price, item.unit_price + 50].map(p => (
+                      <button key={p} onClick={() => updateItem(idx, 'unit_price', p)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${item.unit_price === p ? 'bg-gray-700 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-400'}`}>
+                        ${p}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    value={item.unit_price}
+                    onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))}
+                  />
                 </div>
-                <div className="text-sm font-medium text-gray-700 w-20 text-right">${(item.quantity * item.unit_price).toLocaleString()}</div>
+                <div className="text-base font-bold text-orange-600 w-20 text-right">${(item.quantity * item.unit_price).toLocaleString()}</div>
               </div>
             </div>
           ))}
