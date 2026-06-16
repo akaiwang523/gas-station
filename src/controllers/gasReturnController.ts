@@ -40,12 +40,15 @@ export async function resolveReturn(req: Request, res: Response) {
 }
 
 // 取得客戶待處理存氣（接單時顯示用）
+// 顯示：PENDING 的，以及最近 30 天內的 RECORD
 export async function getPendingReturns(req: Request, res: Response) {
   const customerId = Number(req.params.customerId)
   const [rows] = await db.query(
     `SELECT * FROM gas_returns
-     WHERE customer_id = ? AND status = 'PENDING'
-     ORDER BY created_at DESC`,
+     WHERE customer_id = ?
+       AND (status = 'PENDING' OR (action = 'RECORD' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)))
+     ORDER BY created_at DESC
+     LIMIT 3`,
     [customerId]
   ) as any
   res.json({ returns: rows })
