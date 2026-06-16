@@ -4,11 +4,10 @@ RUN apt-get update && apt-get install -y openssl libssl-dev && rm -rf /var/lib/a
 
 WORKDIR /src
 
-COPY package*.json ./
-RUN npm install --omit=dev
-
 COPY . .
+
+RUN npm install
 
 EXPOSE 8080
 
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["node_modules/.bin/tsx", "src/index.ts"]
