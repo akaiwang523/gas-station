@@ -87,4 +87,8 @@ export const api = {
     request(`/orders/${id}/cancel`, { method: 'PATCH' }),
   deleteOrder: (id: number) =>
     request(`/orders/${id}`, { method: 'DELETE' }),
+  deactivateCustomer: (id: number) =>
+    request(`/customers/${id}/deactivate`, { method: 'PATCH' }),
+  hardDeleteCustomer: (id: number) =>
+    request(`/customers/${id}/hard`, { method: 'DELETE' }),
 }

@@ -124,7 +124,15 @@ export default function CustomerPage() {
               )}
               {c.note && <div className="text-xs text-orange-600 mt-1">📝 {c.note}</div>}
             </div>
-            <button onClick={() => openEdit(c)} className="text-gray-400 hover:text-orange-500 ml-2 text-sm">編輯</button>
+            <div className="flex flex-col gap-1 ml-2 items-end">
+                <button onClick={() => openEdit(c)} className="text-orange-500 text-sm">編輯</button>
+                {c.status === 'ACTIVE' ? (
+                  <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定停用此客戶？')) { await api.deactivateCustomer(c.id); load() } }} className="text-yellow-500 hover:text-yellow-700 text-xs">停用</button>
+                ) : (
+                  <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定啟用此客戶？')) { await api.updateCustomer(c.id, { status: 'ACTIVE' }); load() } }} className="text-green-500 hover:text-green-700 text-xs">啟用</button>
+                )}
+                <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定刪除此客戶？有訂單記錄的客戶無法刪除。')) { try { await api.hardDeleteCustomer(c.id); load() } catch(err: any) { alert(err.message) } } }} className="text-red-400 hover:text-red-600 text-xs">刪除</button>
+              </div>
           </div>
         </div>
       ))}

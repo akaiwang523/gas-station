@@ -68,3 +68,18 @@ export async function deleteCustomer(req: Request, res: Response) {
   await db.query('UPDATE customers SET status = ? WHERE id = ?', ['INACTIVE', Number(req.params.id)])
   res.json({ ok: true })
 }
+export async function deactivateCustomer(req: Request, res: Response) {
+  await db.query('UPDATE customers SET status = ? WHERE id = ?', ['INACTIVE', Number(req.params.id)])
+  res.json({ ok: true })
+}
+
+export async function hardDeleteCustomer(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const [orders] = await db.query('SELECT COUNT(*) as cnt FROM orders WHERE customer_id = ?', [id]) as any
+  if (orders[0].cnt > 0) {
+    return res.status(400).json({ error: `此客戶有 ${orders[0].cnt} 筆訂單記錄，無法刪除。請改用停用。` })
+  }
+  await db.query('DELETE FROM ar_balances WHERE customer_id = ?', [id])
+  await db.query('DELETE FROM customers WHERE id = ?', [id])
+  res.json({ ok: true })
+}
