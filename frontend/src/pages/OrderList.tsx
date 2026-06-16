@@ -162,12 +162,15 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 </span>
               </div>
               {order.note && <div className="text-sm text-orange-600 mb-2">📝 {order.note}</div>}
-              {returnsMap[order.customer_id]?.map((r: any) => (
-                <div key={r.id} className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 mb-2">
-                  ⚠️ 存氣 {r.remaining_kg}kg
-                  {Number(r.amount) > 0 && <span className="ml-1 text-yellow-700 font-medium">· {r.action === 'REFUND' ? '退費' : '抵扣'} ${Number(r.amount).toLocaleString()}</span>}
+              {returnsMap[order.customer_id]?.[0] && (
+                <div className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 mb-2 flex justify-between items-center">
+                  <span>⚠️ 上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg</span>
+                  {Number(returnsMap[order.customer_id][0].amount) > 0
+                    ? <span className="text-yellow-700 font-medium">{returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} ${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}</span>
+                    : <span className="text-yellow-600 text-xs">{returnsMap[order.customer_id][0].action === 'RECORD' ? '只記錄' : ''}</span>
+                  }
                 </div>
-              ))}
+              )}
               <div className="flex gap-2 mt-3">
                 {order.status === 'PENDING' && (
                   <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">

@@ -48,7 +48,7 @@ export async function getPendingReturns(req: Request, res: Response) {
      WHERE customer_id = ?
        AND (status = 'PENDING' OR (action = 'RECORD' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)))
      ORDER BY created_at DESC
-     LIMIT 3`,
+     LIMIT 1`,
     [customerId]
   ) as any
   res.json({ returns: rows })
