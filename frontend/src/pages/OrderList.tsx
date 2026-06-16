@@ -38,6 +38,12 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [filter, setFilter] = useState('ALL')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<number | null>(null)
+  const [returnModal, setReturnModal] = useState<{orderId: number, customerId: number, customerName: string} | null>(null)
+  const [returnKg, setReturnKg] = useState('')
+  const [returnAction, setReturnAction] = useState('RECORD')
+  const [returnAmount, setReturnAmount] = useState('')
+  const [returnNote, setReturnNote] = useState('')
+  const [returnLoading, setReturnLoading] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -79,7 +85,31 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         await api.updateOrderStatus(order.id, 'DELIVERED')
       }
       await load()
+      // 完成後詢問是否登記存氣
+      setReturnModal({ orderId: order.id, customerId: order.customer_id, customerName: order.customer_name })
+      setReturnKg('')
+      setReturnAction('RECORD')
+      setReturnAmount('')
+      setReturnNote('')
     } finally { setActionId(null) }
+  }
+
+  async function submitReturn() {
+    if (!returnModal || !returnKg) { setReturnModal(null); return }
+    setReturnLoading(true)
+    try {
+      await api.createReturn({
+        customerId: returnModal.customerId,
+        orderId: returnModal.orderId,
+        cylinderType: 'BOTTLED_20KG',
+        remainingKg: Number(returnKg),
+        action: returnAction,
+        amount: Number(returnAmount) || 0,
+        note: returnNote,
+      })
+      setReturnModal(null)
+      await load()
+    } finally { setReturnLoading(false) }
   }
 
   async function undoDelivered(id: number) {
@@ -224,6 +254,40 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       )}
 
       {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-12">今日暫無訂單</div>}
+      {/* 存氣登記 Modal */}
+      {returnModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-end z-50">
+          <div className="bg-white w-full max-w-lg mx-auto rounded-t-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold">登記存氣 — {returnModal.customerName}</h3>
+              <button onClick={() => setReturnModal(null)} className="text-gray-400 text-2xl">×</button>
+            </div>
+            <p className="text-sm text-gray-500">收回舊桶有剩餘瓦斯？填寫登記（可跳過）</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">剩餘公斤數</label>
+                <input type="number" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="例：5" value={returnKg} onChange={e => setReturnKg(e.target.value)} />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">退/抵金額</label>
+                <input type="number" className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="0" value={returnAmount} onChange={e => setReturnAmount(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {[['RECORD','只記錄'],['REFUND','退費'],['DEDUCT','下次抵扣']].map(([val, label]) => (
+                <button key={val} onClick={() => setReturnAction(val)} className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${returnAction === val ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>{label}</button>
+              ))}
+            </div>
+            <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none" placeholder="備註（選填）" value={returnNote} onChange={e => setReturnNote(e.target.value)} />
+            <div className="flex gap-3">
+              <button onClick={() => setReturnModal(null)} className="flex-1 bg-gray-100 text-gray-600 font-medium py-3 rounded-xl">跳過</button>
+              <button onClick={submitReturn} disabled={returnLoading || !returnKg} className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl transition">
+                {returnLoading ? '儲存中...' : '✅ 儲存存氣'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
