@@ -4,9 +4,10 @@ RUN apt-get update && apt-get install -y openssl libssl-dev && rm -rf /var/lib/a
 
 WORKDIR /src
 
-COPY . .
-
+COPY package*.json ./
 RUN npm install
+
+COPY . .
 
 EXPOSE 8080
 
