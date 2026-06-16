@@ -91,4 +91,12 @@ export const api = {
     request(`/customers/${id}/deactivate`, { method: 'PATCH' }),
   hardDeleteCustomer: (id: number) =>
     request(`/customers/${id}/hard`, { method: 'DELETE' }),
+  getCustomerReturns: (customerId: number) =>
+    request(`/gas-returns/customer/${customerId}`),
+  getPendingReturns: (customerId: number) =>
+    request(`/gas-returns/customer/${customerId}/pending`),
+  createReturn: (data: any) =>
+    request('/gas-returns', { method: 'POST', body: JSON.stringify(data) }),
+  resolveReturn: (id: number) =>
+    request(`/gas-returns/${id}/resolve`, { method: 'PATCH' }),
 }

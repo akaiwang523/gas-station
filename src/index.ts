@@ -8,6 +8,7 @@ import { callerRoutes } from './routes/caller'
 import { orderRoutes } from './routes/orders'
 import { arRoutes } from './routes/ar'
 import { reportRoutes } from './routes/reports'
+import { gasReturnRoutes } from './routes/gasReturns'
 import { errorHandler } from './middleware/errorHandler'
 
 dotenv.config()
@@ -25,6 +26,7 @@ app.use('/api/caller', callerRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/ar', arRoutes)
 app.use('/api/reports', reportRoutes)
+app.use('/api/gas-returns', gasReturnRoutes)
 
 // Serve frontend
 const frontendDist = path.join(__dirname, '../frontend/dist')

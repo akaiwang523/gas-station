@@ -42,6 +42,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: 800 }
   ])
   const [lastOrderHint, setLastOrderHint] = useState<string>('')
+  const [pendingReturns, setPendingReturns] = useState<any[]>([])
+  const [showReturnForm, setShowReturnForm] = useState(false)
+  const [returnKg, setReturnKg] = useState('')
+  const [returnAction, setReturnAction] = useState('RECORD')
+  const [returnAmount, setReturnAmount] = useState('')
+  const [returnNote, setReturnNote] = useState('')
   const [stairFee, setStairFee] = useState(0)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [note, setNote] = useState('')
@@ -68,6 +74,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setResults([])
     if (Number(c.amount_owed) > 0) setPaymentType('AR')
     else setPaymentType('CASH')
+
+    // 查待處理存氣
+    try {
+      const pr = await api.getPendingReturns(c.id)
+      setPendingReturns(pr.returns || [])
+    } catch { setPendingReturns([]) }
 
     // 帶出上一單
     try {
@@ -97,6 +109,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setNewName(search)
     setResults([])
     setLastOrderHint('')
+    setPendingReturns([])
+    setShowReturnForm(false)
+    setReturnKg('')
+    setReturnAction('RECORD')
+    setReturnAmount('')
+    setReturnNote('')
   }
 
   function addItem() {
@@ -131,6 +149,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setNote('')
     setError('')
     setLastOrderHint('')
+    setPendingReturns([])
+    setShowReturnForm(false)
+    setReturnKg('')
+    setReturnAction('RECORD')
+    setReturnAmount('')
+    setReturnNote('')
   }
 
   async function handleSubmit() {
@@ -158,7 +182,20 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       }
 
       const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
-      await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote })
+      const orderRes = await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote })
+      
+      // 如果有填存氣記錄
+      if (showReturnForm && returnKg) {
+        await api.createReturn({
+          customerId,
+          orderId: orderRes.id,
+          cylinderType: items[0]?.gas_type || 'BOTTLED_20KG',
+          remainingKg: Number(returnKg),
+          action: returnAction,
+          amount: Number(returnAmount) || 0,
+          note: returnNote,
+        })
+      }
 
       const name = isNew ? newName : selected!.name
       const totalQty = items.reduce((s, i) => s + i.quantity, 0)
@@ -286,6 +323,50 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           <button onClick={() => setPaymentType('CASH')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600'}`}>💵 現金</button>
           <button onClick={() => setPaymentType('AR')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'AR' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600'}`}>📒 欠帳</button>
         </div>
+      </div>
+
+      {/* 待處理存氣提醒 */}
+      {pendingReturns.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 space-y-1">
+          <div className="text-sm font-medium text-yellow-700">⚠️ 有待處理存氣</div>
+          {pendingReturns.map((r: any) => (
+            <div key={r.id} className="flex justify-between items-center text-sm">
+              <span className="text-yellow-700">剩餘 {r.remaining_kg} kg · {r.action === 'REFUND' ? '待退費' : '待抵扣'} ${Number(r.amount).toLocaleString()}</span>
+              <button onClick={async () => { await api.resolveReturn(r.id); setPendingReturns(prev => prev.filter(x => x.id !== r.id)) }} className="text-xs text-yellow-600 underline">標記完成</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 存氣記錄 */}
+      <div>
+        <button onClick={() => setShowReturnForm(!showReturnForm)} className="text-sm text-gray-500 hover:text-orange-500 transition">
+          {showReturnForm ? '▼ 取消登記存氣' : '+ 登記存氣（收回舊桶有剩餘）'}
+        </button>
+        {showReturnForm && (
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+            <div className="text-sm font-medium text-blue-700">存氣登記</div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">剩餘公斤數</label>
+                <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="例：5" value={returnKg} onChange={e => setReturnKg(e.target.value)} />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">退/抵金額</label>
+                <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="0" value={returnAmount} onChange={e => setReturnAmount(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">處理方式</label>
+              <div className="flex gap-2">
+                {[['RECORD','只記錄'],['REFUND','退費'],['DEDUCT','下次抵扣']].map(([val, label]) => (
+                  <button key={val} onClick={() => setReturnAction(val)} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${returnAction === val ? 'bg-blue-500 text-white' : 'bg-white text-gray-600'}`}>{label}</button>
+                ))}
+              </div>
+            </div>
+            <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="備註（選填）" value={returnNote} onChange={e => setReturnNote(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {/* 備註 */}
