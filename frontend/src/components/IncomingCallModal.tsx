@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 const POLL_INTERVAL = 4000
 
@@ -25,58 +25,58 @@ interface Draft {
   createdAt: string
 }
 
-interface UnknownCall {
-  phone: string
-}
-
 export default function IncomingCallModal() {
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [unknownCall, setUnknownCall] = useState<UnknownCall | null>(null)
+  const [unknownPhone, setUnknownPhone] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [loading, setLoading] = useState(false)
-  const [lastDraftId, setLastDraftId] = useState<number | null>(null)
-  const [lastUnknownPhone, setLastUnknownPhone] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
 
+  const shownDraftId = useRef<number | null>(null)
+  const shownUnknownPhone = useRef<string | null>(null)
   const token = localStorage.getItem('token')
 
-  const fetchDraft = useCallback(async () => {
-    if (!token) return
-    try {
-      const res = await fetch('/api/caller/draft', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      const data = await res.json()
-      if (data.draft && data.draft.id !== lastDraftId) {
-        setDraft(data.draft)
-        setUnknownCall(null)
-        setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
-        setLastDraftId(data.draft.id)
-        setLastUnknownPhone(null)
-        setVisible(true)
-      } else if (data.unknownPhone && data.unknownPhone !== lastUnknownPhone) {
-        setUnknownCall({ phone: data.unknownPhone })
-        setDraft(null)
-        setLastUnknownPhone(data.unknownPhone)
-        setNewName('')
-        setNewAddress('')
-        setVisible(true)
-      } else if (!data.draft && !data.unknownPhone && visible) {
-        setVisible(false)
-        setDraft(null)
-        setUnknownCall(null)
-      }
-    } catch {
-      // 靜默失敗
-    }
-  }, [token, lastDraftId, lastUnknownPhone, visible])
-
   useEffect(() => {
-    const timer = setInterval(fetchDraft, POLL_INTERVAL)
+    if (!token) return
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/caller/draft', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        const data = await res.json()
+
+        if (data.draft) {
+          if (data.draft.id !== shownDraftId.current) {
+            shownDraftId.current = data.draft.id
+            shownUnknownPhone.current = null
+            setDraft(data.draft)
+            setUnknownPhone(null)
+            setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
+            setVisible(true)
+          }
+        } else if (data.unknownPhone) {
+          if (data.unknownPhone !== shownUnknownPhone.current) {
+            shownUnknownPhone.current = data.unknownPhone
+            shownDraftId.current = null
+            setUnknownPhone(data.unknownPhone)
+            setDraft(null)
+            setNewName('')
+            setNewAddress('')
+            setVisible(true)
+          }
+        }
+      } catch {
+        // 靜默失敗
+      }
+    }
+
+    poll() // 立即執行一次
+    const timer = setInterval(poll, POLL_INTERVAL)
     return () => clearInterval(timer)
-  }, [fetchDraft])
+  }, [token])
 
   async function handleConfirm() {
     if (!draft) return
@@ -92,7 +92,6 @@ export default function IncomingCallModal() {
       })
       setVisible(false)
       setDraft(null)
-      setLastDraftId(null)
       window.dispatchEvent(new Event('order-refresh'))
     } finally {
       setLoading(false)
@@ -110,16 +109,14 @@ export default function IncomingCallModal() {
     } finally {
       setVisible(false)
       setDraft(null)
-      setLastDraftId(null)
       setLoading(false)
     }
   }
 
   async function handleCreateAndOrder() {
-    if (!unknownCall) return
+    if (!unknownPhone) return
     setLoading(true)
     try {
-      // 新增客戶
       const res = await fetch('/api/caller/create', {
         method: 'POST',
         headers: {
@@ -127,30 +124,18 @@ export default function IncomingCallModal() {
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          phone: unknownCall.phone,
-          name: newName || `來電 ${unknownCall.phone}`,
+          phone: unknownPhone,
+          name: newName || `來電 ${unknownPhone}`,
           address: newAddress || '（待補）',
-          apiKey: (window as any).__CALLER_API_KEY__ || ''
+          apiKey: 'gas2026secret'
         })
       })
-      const data = await res.json()
-      const customerId = data.customer?.id
-      if (customerId) {
-        // 建草稿單
-        await fetch('/api/caller/incoming-by-id', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ customerId })
-        })
-        window.dispatchEvent(new Event('order-refresh'))
-      }
+      await res.json()
+      shownUnknownPhone.current = null
+      window.dispatchEvent(new Event('order-refresh'))
     } finally {
       setVisible(false)
-      setUnknownCall(null)
-      setLastUnknownPhone(null)
+      setUnknownPhone(null)
       setLoading(false)
     }
   }
@@ -158,13 +143,12 @@ export default function IncomingCallModal() {
   function handleDismiss() {
     setVisible(false)
     setDraft(null)
-    setUnknownCall(null)
+    setUnknownPhone(null)
   }
 
   if (!visible) return null
 
-  // 陌生號碼畫面
-  if (unknownCall) {
+  if (unknownPhone) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
@@ -172,23 +156,21 @@ export default function IncomingCallModal() {
             <span className="text-3xl">📞</span>
             <div>
               <div className="font-bold text-lg">陌生來電</div>
-              <div className="text-gray-300 text-sm">{unknownCall.phone}</div>
+              <div className="text-gray-300 text-sm">{unknownPhone}</div>
             </div>
           </div>
 
           <div className="px-5 py-4 space-y-3">
             <div className="text-gray-500 text-sm">尚未建檔，要新增客戶並建單嗎？</div>
-
             <div>
               <label className="text-xs text-gray-500">姓名</label>
               <input
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
-                placeholder={`來電 ${unknownCall.phone}`}
+                placeholder={`來電 ${unknownPhone}`}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
               />
             </div>
-
             <div>
               <label className="text-xs text-gray-500">地址</label>
               <input
@@ -201,17 +183,10 @@ export default function IncomingCallModal() {
           </div>
 
           <div className="px-5 pb-5 flex gap-3">
-            <button
-              onClick={handleDismiss}
-              className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium"
-            >
+            <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
               略過
             </button>
-            <button
-              onClick={handleCreateAndOrder}
-              disabled={loading}
-              className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold"
-            >
+            <button onClick={handleCreateAndOrder} disabled={loading} className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold">
               ➕ 新增並建單
             </button>
           </div>
@@ -220,7 +195,6 @@ export default function IncomingCallModal() {
     )
   }
 
-  // 已知客戶草稿單畫面
   if (!draft) return null
 
   return (
@@ -263,17 +237,13 @@ export default function IncomingCallModal() {
           <div className="flex gap-2">
             <button
               onClick={() => setPaymentType('CASH')}
-              className={`flex-1 py-2.5 rounded-xl font-medium transition ${
-                paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600'
-              }`}
+              className={`flex-1 py-2.5 rounded-xl font-medium transition ${paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600'}`}
             >
               💵 現金
             </button>
             <button
               onClick={() => setPaymentType('AR')}
-              className={`flex-1 py-2.5 rounded-xl font-medium transition ${
-                paymentType === 'AR' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-600'
-              }`}
+              className={`flex-1 py-2.5 rounded-xl font-medium transition ${paymentType === 'AR' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-600'}`}
             >
               📒 欠帳
             </button>
@@ -281,18 +251,10 @@ export default function IncomingCallModal() {
         </div>
 
         <div className="px-5 pb-5 flex gap-3">
-          <button
-            onClick={handleCancel}
-            disabled={loading}
-            className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium"
-          >
+          <button onClick={handleCancel} disabled={loading} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
             取消派單
           </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold text-lg"
-          >
+          <button onClick={handleConfirm} disabled={loading} className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold text-lg">
             ✅ 確認派單
           </button>
         </div>
