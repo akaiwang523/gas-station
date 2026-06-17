@@ -130,7 +130,14 @@ export default function IncomingCallModal() {
           apiKey: 'gas2026secret'
         })
       })
-      await res.json()
+      const data = await res.json()
+      if (data.customer?.id) {
+        await fetch('/api/caller/incoming-by-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ customerId: data.customer.id })
+        })
+      }
       shownUnknownPhone.current = null
       window.dispatchEvent(new Event('order-refresh'))
     } finally {
