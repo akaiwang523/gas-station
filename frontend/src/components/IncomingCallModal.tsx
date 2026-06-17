@@ -30,6 +30,8 @@ export default function IncomingCallModal() {
   const [unknownPhone, setUnknownPhone] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
+  const [editQty, setEditQty] = useState(1)
+  const [editPrice, setEditPrice] = useState(800)
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -88,7 +90,7 @@ export default function IncomingCallModal() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ paymentType })
+        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice })
       })
       setVisible(false)
       setDraft(null)
@@ -228,16 +230,27 @@ export default function IncomingCallModal() {
           </div>
 
           <div>
-            <div className="text-gray-500 text-xs mb-2">預填品項（上次訂單）</div>
-            {draft.items.map((item, i) => (
-              <div key={i} className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="font-medium">{item.gasType} × {item.quantity}</span>
-                <span className="text-gray-600">${item.unitPrice} / 桶</span>
+            <div className="text-gray-500 text-xs mb-2">品項（可修改）</div>
+            <div className="flex items-center gap-2 py-2 border-b border-gray-100">
+              <span className="text-sm text-gray-600 w-12">{draft.items[0]?.gasType}</span>
+              <div className="flex items-center gap-2 flex-1">
+                <button onClick={() => setEditQty(q => Math.max(1, q-1))} className="w-8 h-8 rounded-full bg-gray-200 font-bold text-lg">-</button>
+                <span className="w-6 text-center font-medium">{editQty}</span>
+                <button onClick={() => setEditQty(q => q+1)} className="w-8 h-8 rounded-full bg-orange-400 text-white font-bold text-lg">+</button>
               </div>
-            ))}
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 text-sm">$</span>
+                <input
+                  type="number"
+                  value={editPrice}
+                  onChange={e => setEditPrice(Number(e.target.value))}
+                  className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                />
+              </div>
+            </div>
             <div className="flex justify-between items-center pt-2 font-bold text-orange-500 text-lg">
               <span>合計</span>
-              <span>${draft.totalAmount}</span>
+              <span>${editQty * editPrice}</span>
             </div>
           </div>
 
