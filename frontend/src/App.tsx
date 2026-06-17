@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Login from './pages/Login'
 import NewOrder from './pages/NewOrder'
 import OrderList from './pages/OrderList'
 import ArPage from './pages/ArPage'
 import ReportPage from './pages/ReportPage'
 import CustomerPage from './pages/CustomerPage'
+import IncomingCallModal from './components/IncomingCallModal'
 import './index.css'
 
 type Page = 'orders' | 'new' | 'ar' | 'customers' | 'report'
@@ -13,6 +14,12 @@ export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'))
   const [page, setPage] = useState<Page>('orders')
   const [orderRefresh, setOrderRefresh] = useState(0)
+
+  useEffect(() => {
+    const handler = () => setOrderRefresh(r => r + 1)
+    window.addEventListener('order-refresh', handler)
+    return () => window.removeEventListener('order-refresh', handler)
+  }, [])
 
   if (!authed) {
     return <Login onLogin={() => setAuthed(true)} />
@@ -33,6 +40,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      <IncomingCallModal />
+
       {/* Header */}
       <div className="bg-orange-500 text-white px-4 py-3 flex justify-between items-center sticky top-0 z-10 shadow">
         <span className="font-bold text-lg">🔥 瓦斯行管理</span>

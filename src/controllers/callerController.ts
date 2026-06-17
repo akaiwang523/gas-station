@@ -56,3 +56,148 @@ export async function createFromCall(req: Request, res: Response) {
 
   return res.status(201).json({ created: true, customer: { id: customerId, name: name || `來電 ${normalized}`, phone: normalized } })
 }
+
+export async function incomingCall(req: Request, res: Response) {
+  const { phone, apiKey } = req.body
+  if (apiKey !== process.env.CALLER_API_KEY) return res.status(401).json({ error: 'Unauthorized' })
+  if (!phone) return res.status(400).json({ error: 'phone required' })
+
+  const normalized = normalizePhone(phone)
+
+  const [rows] = await db.query(
+    `SELECT c.*, a.amount_owed, a.cylinders_owed 
+     FROM customers c 
+     LEFT JOIN ar_balances a ON a.customer_id = c.id
+     WHERE (c.phone = ? OR c.phone2 = ?) AND c.status != 'INACTIVE' LIMIT 1`,
+    [normalized, normalized]
+  ) as any
+
+  if (!rows[0]) {
+    return res.json({ found: false, phone: normalized, draft: null })
+  }
+
+  const c = rows[0]
+
+  const [lastOrders] = await db.query(
+    `SELECT o.*, oi.gas_type, oi.quantity, oi.unit_price
+     FROM orders o
+     JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.customer_id = ? AND o.status = 'DELIVERED'
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [c.id]
+  ) as any
+
+  const lastOrder = lastOrders[0]
+
+  const gasType = lastOrder?.gas_type || c.gas_type || '20kg'
+  const quantity = lastOrder?.quantity || 1
+  const unitPrice = c.price_override || lastOrder?.unit_price || 800
+  const totalAmount = quantity * unitPrice
+
+  const [result] = await db.query(
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?)`,
+    [c.id, quantity, unitPrice, totalAmount, `來電自動草稿 ${normalized}`]
+  ) as any
+
+  const draftId = result.insertId
+
+  await db.query(
+    `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
+     VALUES (?, ?, ?, ?, ?)`,
+    [draftId, gasType, quantity, unitPrice, totalAmount]
+  )
+
+  return res.json({
+    found: true,
+    draft: {
+      id: draftId,
+      customer: {
+        id: c.id, name: c.name, phone: c.phone,
+        address: c.address, note: c.note,
+        amountOwed: c.amount_owed ?? 0,
+      },
+      items: [{ gasType, quantity, unitPrice, subtotal: totalAmount }],
+      totalAmount,
+      paymentType: 'CASH',
+    },
+  })
+}
+
+export async function getDraft(_req: Request, res: Response) {
+  const [rows] = await db.query(
+    `SELECT o.*, 
+      c.name as customer_name, c.phone as customer_phone,
+      c.address as customer_address, c.note as customer_note
+     FROM orders o
+     JOIN customers c ON c.id = o.customer_id
+     WHERE o.status = 'DRAFT'
+     ORDER BY o.created_at DESC LIMIT 1`
+  ) as any
+
+  if (!rows[0]) return res.json({ draft: null })
+
+  const order = rows[0]
+  const [items] = await db.query(
+    'SELECT * FROM order_items WHERE order_id = ?',
+    [order.id]
+  ) as any
+
+  return res.json({
+    draft: {
+      id: order.id,
+      customer: {
+        id: order.customer_id,
+        name: order.customer_name,
+        phone: order.customer_phone,
+        address: order.customer_address,
+        note: order.customer_note,
+        amountOwed: order.amount_owed ?? 0,
+      },
+      items: items.map((i: any) => ({
+        gasType: i.gas_type,
+        quantity: i.quantity,
+        unitPrice: i.unit_price,
+        subtotal: i.subtotal,
+      })),
+      totalAmount: order.total_amount,
+      paymentType: order.payment_type,
+      createdAt: order.created_at,
+    }
+  })
+}
+
+export async function confirmDraft(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const { paymentType, note } = req.body
+
+  const [rows] = await db.query(`SELECT * FROM orders WHERE id = ? AND status = 'DRAFT'`, [id]) as any
+  if (!rows[0]) return res.status(404).json({ error: '草稿不存在' })
+
+  const order = rows[0]
+
+  await db.query(
+    `UPDATE orders SET status = 'PENDING', payment_type = ?, note = ? WHERE id = ?`,
+    [paymentType || order.payment_type, note || order.note, id]
+  )
+
+  if ((paymentType || order.payment_type) === 'AR') {
+    await db.query(
+      `UPDATE ar_balances SET amount_owed = amount_owed + ?, cylinders_owed = cylinders_owed + ? WHERE customer_id = ?`,
+      [order.total_amount, order.quantity, order.customer_id]
+    )
+  }
+
+  return res.json({ ok: true })
+}
+
+export async function cancelDraft(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const [rows] = await db.query(`SELECT id FROM orders WHERE id = ? AND status = 'DRAFT'`, [id]) as any
+  if (!rows[0]) return res.status(404).json({ error: '草稿不存在' })
+
+  await db.query('DELETE FROM order_items WHERE order_id = ?', [id])
+  await db.query('DELETE FROM orders WHERE id = ?', [id])
+
+  return res.json({ ok: true })
+}
