@@ -25,11 +25,35 @@ export default function ReportPage() {
   const [searchDate, setSearchDate] = useState('')
   const [searchCustomer, setSearchCustomer] = useState('')
   const [searchLoading, setSearchLoading] = useState(false)
+  const [_searchActionId, setSearchActionId] = useState<number | null>(null)
   const [today, setToday] = useState<any>(null)
   const [monthData, setMonthData] = useState<any>(null)
   const [selectedMonth, setSelectedMonth] = useState(getMonthOptions()[0].value)
   const [loading, setLoading] = useState(false)
   const monthOptions = getMonthOptions()
+
+  // eslint-disable-next-line
+  async function cancelSearchOrder(id: number) {
+    if (!window.confirm('確定要取消這筆訂單嗎？')) return
+    setSearchActionId(id)
+    try { await api.cancelOrder(id); searchOrderHistory() }
+    finally { setSearchActionId(null) }
+  }
+
+  // eslint-disable-next-line
+  async function deleteSearchOrder(id: number) {
+    if (!window.confirm('確定要刪除這筆訂單嗎？刪除後無法復原。')) return
+    setSearchActionId(id)
+    try { await api.deleteOrder(id); searchOrderHistory() }
+    finally { setSearchActionId(null) }
+  }
+
+  // eslint-disable-next-line
+  async function updateSearchOrderStatus(id: number, status: string) {
+    setSearchActionId(id)
+    try { await api.updateOrderStatus(id, status); searchOrderHistory() }
+    finally { setSearchActionId(null) }
+  }
 
   async function searchOrderHistory() {
     setSearchLoading(true)
