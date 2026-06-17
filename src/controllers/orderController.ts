@@ -2,7 +2,7 @@ import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
 export async function listOrders(req: Request, res: Response) {
-  const { status, date, customerId, limit = '10' } = req.query
+  const { status, date, customerId, limit = '10', all } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
@@ -12,7 +12,7 @@ export async function listOrders(req: Request, res: Response) {
     if (date) {
       conditions.push('DATE(o.created_at) = ?')
       params.push(date)
-    } else {
+    } else if (!all) {
       conditions.push('DATE(o.created_at) = CURDATE()')
     }
   }
