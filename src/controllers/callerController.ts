@@ -8,6 +8,10 @@ function normalizePhone(raw: string): string {
   return p
 }
 
+// 暫存陌生來電號碼（記憶體，重啟清空）
+let unknownCallerPhone: string | null = null
+let unknownCallerTime: number = 0
+
 export async function lookupCaller(req: Request, res: Response) {
   const { phone, apiKey } = req.body
   if (apiKey !== process.env.CALLER_API_KEY) return res.status(401).json({ error: 'Unauthorized' })
@@ -54,6 +58,9 @@ export async function createFromCall(req: Request, res: Response) {
   const customerId = result.insertId
   await db.query('INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed) VALUES (?, 0, 0)', [customerId])
 
+  // 清掉陌生來電暫存
+  unknownCallerPhone = null
+
   return res.status(201).json({ created: true, customer: { id: customerId, name: name || `來電 ${normalized}`, phone: normalized } })
 }
 
@@ -73,8 +80,14 @@ export async function incomingCall(req: Request, res: Response) {
   ) as any
 
   if (!rows[0]) {
+    // 陌生號碼，暫存
+    unknownCallerPhone = normalized
+    unknownCallerTime = Date.now()
     return res.json({ found: false, phone: normalized, draft: null })
   }
+
+  // 清掉陌生來電暫存
+  unknownCallerPhone = null
 
   const c = rows[0]
 
@@ -125,6 +138,7 @@ export async function incomingCall(req: Request, res: Response) {
 }
 
 export async function getDraft(_req: Request, res: Response) {
+  // 先查資料庫有沒有 DRAFT 訂單
   const [rows] = await db.query(
     `SELECT o.*, 
       c.name as customer_name, c.phone as customer_phone,
@@ -135,36 +149,45 @@ export async function getDraft(_req: Request, res: Response) {
      ORDER BY o.created_at DESC LIMIT 1`
   ) as any
 
-  if (!rows[0]) return res.json({ draft: null })
+  if (rows[0]) {
+    const order = rows[0]
+    const [items] = await db.query(
+      'SELECT * FROM order_items WHERE order_id = ?',
+      [order.id]
+    ) as any
 
-  const order = rows[0]
-  const [items] = await db.query(
-    'SELECT * FROM order_items WHERE order_id = ?',
-    [order.id]
-  ) as any
-
-  return res.json({
-    draft: {
-      id: order.id,
-      customer: {
-        id: order.customer_id,
-        name: order.customer_name,
-        phone: order.customer_phone,
-        address: order.customer_address,
-        note: order.customer_note,
-        amountOwed: order.amount_owed ?? 0,
+    return res.json({
+      draft: {
+        id: order.id,
+        customer: {
+          id: order.customer_id,
+          name: order.customer_name,
+          phone: order.customer_phone,
+          address: order.customer_address,
+          note: order.customer_note,
+          amountOwed: order.amount_owed ?? 0,
+        },
+        items: items.map((i: any) => ({
+          gasType: i.gas_type,
+          quantity: i.quantity,
+          unitPrice: i.unit_price,
+          subtotal: i.subtotal,
+        })),
+        totalAmount: order.total_amount,
+        paymentType: order.payment_type,
+        createdAt: order.created_at,
       },
-      items: items.map((i: any) => ({
-        gasType: i.gas_type,
-        quantity: i.quantity,
-        unitPrice: i.unit_price,
-        subtotal: i.subtotal,
-      })),
-      totalAmount: order.total_amount,
-      paymentType: order.payment_type,
-      createdAt: order.created_at,
-    }
-  })
+      unknownPhone: null,
+    })
+  }
+
+  // 沒有草稿單，看有沒有陌生來電（5分鐘內有效）
+  const fiveMin = 5 * 60 * 1000
+  if (unknownCallerPhone && Date.now() - unknownCallerTime < fiveMin) {
+    return res.json({ draft: null, unknownPhone: unknownCallerPhone })
+  }
+
+  return res.json({ draft: null, unknownPhone: null })
 }
 
 export async function confirmDraft(req: Request, res: Response) {

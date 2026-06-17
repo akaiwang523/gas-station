@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react'
-import { api } from '../lib/api'
 
 const POLL_INTERVAL = 4000
 
@@ -26,32 +25,53 @@ interface Draft {
   createdAt: string
 }
 
+interface UnknownCall {
+  phone: string
+}
+
 export default function IncomingCallModal() {
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [unknownCall, setUnknownCall] = useState<UnknownCall | null>(null)
   const [visible, setVisible] = useState(false)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [loading, setLoading] = useState(false)
   const [lastDraftId, setLastDraftId] = useState<number | null>(null)
+  const [lastUnknownPhone, setLastUnknownPhone] = useState<string | null>(null)
+  const [newName, setNewName] = useState('')
+  const [newAddress, setNewAddress] = useState('')
+
+  const token = localStorage.getItem('token')
 
   const fetchDraft = useCallback(async () => {
+    if (!token) return
     try {
-      const data = await (api as any).request?.('/caller/draft') ?? 
-        await fetch('/api/caller/draft', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        }).then(r => r.json())
+      const res = await fetch('/api/caller/draft', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
       if (data.draft && data.draft.id !== lastDraftId) {
         setDraft(data.draft)
+        setUnknownCall(null)
         setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
         setLastDraftId(data.draft.id)
+        setLastUnknownPhone(null)
         setVisible(true)
-      } else if (!data.draft && visible && lastDraftId) {
+      } else if (data.unknownPhone && data.unknownPhone !== lastUnknownPhone) {
+        setUnknownCall({ phone: data.unknownPhone })
+        setDraft(null)
+        setLastUnknownPhone(data.unknownPhone)
+        setNewName('')
+        setNewAddress('')
+        setVisible(true)
+      } else if (!data.draft && !data.unknownPhone && visible) {
         setVisible(false)
         setDraft(null)
+        setUnknownCall(null)
       }
     } catch {
       // 靜默失敗
     }
-  }, [lastDraftId, visible])
+  }, [token, lastDraftId, lastUnknownPhone, visible])
 
   useEffect(() => {
     const timer = setInterval(fetchDraft, POLL_INTERVAL)
@@ -66,7 +86,7 @@ export default function IncomingCallModal() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ paymentType })
       })
@@ -85,7 +105,7 @@ export default function IncomingCallModal() {
     try {
       await fetch(`/api/caller/draft/${draft.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        headers: { Authorization: `Bearer ${token}` }
       })
     } finally {
       setVisible(false)
@@ -95,7 +115,113 @@ export default function IncomingCallModal() {
     }
   }
 
-  if (!visible || !draft) return null
+  async function handleCreateAndOrder() {
+    if (!unknownCall) return
+    setLoading(true)
+    try {
+      // 新增客戶
+      const res = await fetch('/api/caller/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          phone: unknownCall.phone,
+          name: newName || `來電 ${unknownCall.phone}`,
+          address: newAddress || '（待補）',
+          apiKey: (window as any).__CALLER_API_KEY__ || ''
+        })
+      })
+      const data = await res.json()
+      const customerId = data.customer?.id
+      if (customerId) {
+        // 建草稿單
+        await fetch('/api/caller/incoming-by-id', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ customerId })
+        })
+        window.dispatchEvent(new Event('order-refresh'))
+      }
+    } finally {
+      setVisible(false)
+      setUnknownCall(null)
+      setLastUnknownPhone(null)
+      setLoading(false)
+    }
+  }
+
+  function handleDismiss() {
+    setVisible(false)
+    setDraft(null)
+    setUnknownCall(null)
+  }
+
+  if (!visible) return null
+
+  // 陌生號碼畫面
+  if (unknownCall) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="bg-gray-700 text-white px-5 py-4 flex items-center gap-3">
+            <span className="text-3xl">📞</span>
+            <div>
+              <div className="font-bold text-lg">陌生來電</div>
+              <div className="text-gray-300 text-sm">{unknownCall.phone}</div>
+            </div>
+          </div>
+
+          <div className="px-5 py-4 space-y-3">
+            <div className="text-gray-500 text-sm">尚未建檔，要新增客戶並建單嗎？</div>
+
+            <div>
+              <label className="text-xs text-gray-500">姓名</label>
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder={`來電 ${unknownCall.phone}`}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500">地址</label>
+              <input
+                value={newAddress}
+                onChange={e => setNewAddress(e.target.value)}
+                placeholder="（待補）"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
+              />
+            </div>
+          </div>
+
+          <div className="px-5 pb-5 flex gap-3">
+            <button
+              onClick={handleDismiss}
+              className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium"
+            >
+              略過
+            </button>
+            <button
+              onClick={handleCreateAndOrder}
+              disabled={loading}
+              className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold"
+            >
+              ➕ 新增並建單
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 已知客戶草稿單畫面
+  if (!draft) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
