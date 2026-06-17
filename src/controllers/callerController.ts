@@ -208,6 +208,7 @@ export async function confirmDraft(req: Request, res: Response) {
   )
 
   const finalGasType = gasType || '20kg'
+  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, id })
   await db.query(
     `UPDATE order_items SET gas_type = ?, quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
     [finalGasType, finalQty, finalPrice, finalTotal, id]
