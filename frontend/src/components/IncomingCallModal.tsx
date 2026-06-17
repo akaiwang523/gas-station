@@ -73,7 +73,7 @@ export default function IncomingCallModal() {
       }
     }
 
-    poll() // 立即執行一次
+    setTimeout(poll, 1000) // 延遲1秒等token準備好
     const timer = setInterval(poll, POLL_INTERVAL)
     return () => clearInterval(timer)
   }, [token])
