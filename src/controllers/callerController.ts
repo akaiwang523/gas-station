@@ -247,7 +247,7 @@ export async function incomingCallById(req: Request, res: Response) {
 
   const [result] = await db.query(
     `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
-     VALUES (?, ?, ?, ?, 'PENDING', 'CASH', '陌生來電新建單')`,
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電草稿')`,
     [c.id, quantity, unitPrice, totalAmount]
   ) as any
 
