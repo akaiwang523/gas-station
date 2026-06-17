@@ -305,6 +305,23 @@ export default function ReportPage() {
                       </div>
                     </div>
                   </div>
+                  <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
+                    {o.status === 'PENDING' && (
+                      <button onClick={async () => { await api.updateOrderStatus(o.id, 'DELIVERING'); searchOrderHistory() }} className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium py-1.5 rounded-lg transition">🚛 出發</button>
+                    )}
+                    {(o.status === 'DELIVERING' || o.status === 'ASSIGNED') && (
+                      <button onClick={async () => { await api.updateOrderStatus(o.id, 'DELIVERED'); searchOrderHistory() }} className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium py-1.5 rounded-lg transition">✅ 完成</button>
+                    )}
+                    {o.status === 'DELIVERED' && (
+                      <button onClick={async () => { await api.updateOrderStatus(o.id, 'PENDING'); searchOrderHistory() }} className="flex-1 bg-orange-400 hover:bg-orange-500 text-white text-xs font-medium py-1.5 rounded-lg transition">↩ 撤銷</button>
+                    )}
+                    {o.status !== 'CANCELLED' && o.status !== 'DELIVERED' && (
+                      <button onClick={async () => { if(window.confirm('確定取消？')) { await api.cancelOrder(o.id); searchOrderHistory() }}} className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-xs py-1.5 rounded-lg transition">取消</button>
+                    )}
+                    {(o.status === 'CANCELLED' || o.status === 'DELIVERED') && (
+                      <button onClick={async () => { if(window.confirm('確定刪除？')) { try { await api.deleteOrder(o.id); searchOrderHistory() } catch(e: any) { alert(e.message) }}}} className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-xs py-1.5 rounded-lg transition">🗑 刪除</button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
