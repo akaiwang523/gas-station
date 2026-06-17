@@ -224,3 +224,40 @@ export async function cancelDraft(req: Request, res: Response) {
 
   return res.json({ ok: true })
 }
+
+export async function incomingCallById(req: Request, res: Response) {
+  const { customerId } = req.body
+  if (!customerId) return res.status(400).json({ error: 'customerId required' })
+
+  const [rows] = await db.query(
+    `SELECT c.*, a.amount_owed FROM customers c 
+     LEFT JOIN ar_balances a ON a.customer_id = c.id
+     WHERE c.id = ? AND c.status != 'INACTIVE' LIMIT 1`,
+    [customerId]
+  ) as any
+
+  if (!rows[0]) return res.status(404).json({ error: '客戶不存在' })
+
+  const c = rows[0]
+
+  const gasType = c.gas_type || '20kg'
+  const quantity = 1
+  const unitPrice = c.price_override || 800
+  const totalAmount = quantity * unitPrice
+
+  const [result] = await db.query(
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
+     VALUES (?, ?, ?, ?, 'PENDING', 'CASH', '陌生來電新建單')`,
+    [c.id, quantity, unitPrice, totalAmount]
+  ) as any
+
+  const orderId = result.insertId
+
+  await db.query(
+    `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
+     VALUES (?, ?, ?, ?, ?)`,
+    [orderId, gasType, quantity, unitPrice, totalAmount]
+  )
+
+  return res.json({ ok: true, orderId })
+}

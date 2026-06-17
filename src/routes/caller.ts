@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { lookupCaller, createFromCall, incomingCall, getDraft, confirmDraft, cancelDraft } from '../controllers/callerController'
+import { lookupCaller, createFromCall, incomingCall, getDraft, confirmDraft, cancelDraft, incomingCallById } from '../controllers/callerController'
 import { authenticate } from '../middleware/auth'
 
 export const callerRoutes = Router()
@@ -13,3 +13,4 @@ callerRoutes.post('/incoming', incomingCall)
 callerRoutes.get('/draft', authenticate, getDraft)
 callerRoutes.post('/draft/:id/confirm', authenticate, confirmDraft)
 callerRoutes.delete('/draft/:id', authenticate, cancelDraft)
+callerRoutes.post('/incoming-by-id', authenticate, incomingCallById)
