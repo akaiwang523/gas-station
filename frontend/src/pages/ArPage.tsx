@@ -56,10 +56,10 @@ export default function ArPage() {
   const [payNote, setPayNote] = useState('')
   const [payLoading, setPayLoading] = useState(false)
   const [statement, setStatement] = useState<any>(null)
-  const [monthFilter, setMonthFilter] = useState('')
   const [monthSummary, setMonthSummary] = useState<any>(null)
   const [monthData, setMonthData] = useState<any[]>([])
   const [monthLoading, setMonthLoading] = useState(false)
+  const [monthFilters, setMonthFilters] = useState<string[]>([])
   const monthOptions = getMonthOptions()
 
   async function load(currentTab?: string) {
@@ -72,18 +72,40 @@ export default function ArPage() {
     }
   }
 
-  async function loadMonthSummary(month: string) {
+  async function loadMonthSummary(months: string[]) {
     try {
-      const res = await api.getMonthSummary(month)
-      setMonthSummary(res)
+      const results = await Promise.all(months.map(m => api.getMonthSummary(m)))
+      const merged = results.reduce((acc: any, r: any) => ({
+        total_customers: Math.max(acc.total_customers || 0, r.total_customers),
+        paid_customers: acc.paid_customers + r.paid_customers,
+        pending_customers: acc.pending_customers + r.pending_customers,
+        total_amount: acc.total_amount + r.total_amount,
+      }), { total_customers: 0, paid_customers: 0, pending_customers: 0, total_amount: 0 })
+      setMonthSummary(merged)
     } catch {}
   }
 
-  async function loadMonth(month: string) {
+  async function loadMonth(month: string, append = false) {
     setMonthLoading(true)
     try {
       const res = await api.getArBalances(undefined, month, tab)
-      setMonthData(res.monthBalances || [])
+      if (append) {
+        setMonthData(prev => {
+          const merged = [...prev]
+          for (const item of (res.monthBalances || [])) {
+            const existing = merged.find((x: any) => x.customer_id === item.customer_id)
+            if (existing) {
+              existing.month_amount = String(Number(existing.month_amount) + Number(item.month_amount))
+              existing.month_cylinders = String(Number(existing.month_cylinders) + Number(item.month_cylinders))
+            } else {
+              merged.push({ ...item })
+            }
+          }
+          return merged
+        })
+      } else {
+        setMonthData(res.monthBalances || [])
+      }
     } finally {
       setMonthLoading(false)
     }
@@ -91,7 +113,7 @@ export default function ArPage() {
 
   useEffect(() => { 
     load(tab)
-    setMonthFilter('')
+    setMonthFilters([])
     setMonthData([])
   }, [tab])
 
@@ -119,7 +141,10 @@ export default function ArPage() {
       setView('list')
       setSelected(null)
       setDetail(null)
-      if (monthFilter) loadMonth(monthFilter)
+      if (monthFilters.length > 0) {
+        setMonthData([])
+        monthFilters.forEach((mf, i) => loadMonth(mf, i > 0))
+      }
     } finally {
       setPayLoading(false)
     }
@@ -127,7 +152,8 @@ export default function ArPage() {
 
   // 月份篩選後的顯示列表
   // 有月份篩選時直接用 monthData，沒有時用 balances
-  const displayBalances = monthFilter ? monthData.map((m: any) => ({
+  const monthFilter = monthFilters.length > 0 ? monthFilters[0] : ''
+  const displayBalances = monthFilters.length > 0 ? monthData.map((m: any) => ({
     id: m.customer_id,
     customer_id: m.customer_id,
     customer_name: m.customer_name,
@@ -140,7 +166,7 @@ export default function ArPage() {
 
   // 總計：有月份篩選時顯示該月應收，否則顯示全部欠款
   const monthTotal = monthData.reduce((s: number, b: any) => s + Number(b.month_amount), 0)
-  const totalOwed = monthFilter
+  const totalOwed = monthFilters.length > 0
     ? monthTotal
     : balances.reduce((s, b) => s + Number(b.amount_owed), 0)
 
@@ -338,10 +364,10 @@ export default function ArPage() {
 
       {/* Tab */}
       <div className="flex bg-gray-100 rounded-xl p-1">
-        <button onClick={() => { setTab('unpaid'); setMonthFilter(''); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'unpaid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+        <button onClick={() => { setTab('unpaid'); setMonthFilters([]); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'unpaid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
           未結清
         </button>
-        <button onClick={() => { setTab('paid'); setMonthFilter(''); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'paid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+        <button onClick={() => { setTab('paid'); setMonthFilters([]); setMonthData([]) }} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === 'paid' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
           已結清
         </button>
       </div>
@@ -361,19 +387,28 @@ export default function ArPage() {
           <div className="flex gap-2 flex-wrap">
             {monthOptions.map(m => (
               <button key={m.value} onClick={() => {
-                const newMonth = monthFilter === m.value ? '' : m.value
-                setMonthFilter(newMonth)
-                if (newMonth) { loadMonth(newMonth); loadMonthSummary(newMonth) }
-                else { setMonthData([]); setMonthSummary(null) }
-              }} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilter === m.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                const isSelected = monthFilters.includes(m.value)
+                const newFilters = isSelected
+                  ? monthFilters.filter(x => x !== m.value)
+                  : [...monthFilters, m.value]
+                setMonthFilters(newFilters)
+                if (newFilters.length > 0) {
+                  setMonthData([])
+                  newFilters.forEach((mf, i) => loadMonth(mf, i > 0))
+                  loadMonthSummary(newFilters)
+                } else {
+                  setMonthData([])
+                  setMonthSummary(null)
+                }
+              }} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${monthFilters.includes(m.value) ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                 {m.label}
               </button>
             ))}
           </div>
-          {monthFilter && monthLoading && <div className="text-center text-gray-400 text-sm py-2">載入中...</div>}
+          {monthFilters.length > 0 && monthLoading && <div className="text-center text-gray-400 text-sm py-2">載入中...</div>}
 
           {/* 月份收款摘要 */}
-          {monthFilter && monthSummary && !monthLoading && (
+          {monthFilters.length > 0 && monthSummary && !monthLoading && (
             <div className="grid grid-cols-3 gap-2 mt-2">
               <div className="bg-gray-50 rounded-xl p-3 text-center">
                 <div className="text-xl font-bold text-gray-800">{monthSummary.total_customers}</div>
