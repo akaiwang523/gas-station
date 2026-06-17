@@ -32,6 +32,7 @@ export default function IncomingCallModal() {
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [editQty, setEditQty] = useState(1)
   const [editPrice, setEditPrice] = useState(800)
+  const [editGasType, setEditGasType] = useState('20kg')
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -90,7 +91,7 @@ export default function IncomingCallModal() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice })
+        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice, gasType: editGasType })
       })
       setVisible(false)
       setDraft(null)
@@ -231,12 +232,25 @@ export default function IncomingCallModal() {
 
           <div>
             <div className="text-gray-500 text-xs mb-2">品項（可修改）</div>
+            {/* 品項選擇 */}
+            <div className="flex gap-2 mb-3">
+              {['20kg','16kg','10kg','4kg'].map(type => (
+                <button
+                  key={type}
+                  onClick={() => setEditGasType(type)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editGasType === type ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+            {/* 數量和價格 */}
             <div className="flex items-center gap-2 py-2 border-b border-gray-100">
-              <span className="text-sm text-gray-600 w-12">{draft.items[0]?.gasType}</span>
               <div className="flex items-center gap-2 flex-1">
                 <button onClick={() => setEditQty(q => Math.max(1, q-1))} className="w-8 h-8 rounded-full bg-gray-200 font-bold text-lg">-</button>
                 <span className="w-6 text-center font-medium">{editQty}</span>
                 <button onClick={() => setEditQty(q => q+1)} className="w-8 h-8 rounded-full bg-orange-400 text-white font-bold text-lg">+</button>
+                <span className="text-gray-500 text-sm ml-1">桶</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="text-gray-500 text-sm">$</span>
