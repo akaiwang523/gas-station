@@ -187,3 +187,23 @@ export async function deleteOrder(req: Request, res: Response) {
   await db.query('DELETE FROM orders WHERE id = ?', [id])
   res.json({ ok: true })
 }
+
+export async function updateOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const { quantity, unitPrice, totalAmount, note } = req.body
+
+  const [rows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
+  if (!rows[0]) return res.status(404).json({ error: '訂單不存在' })
+
+  await db.query(
+    `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
+    [quantity, unitPrice, totalAmount, note ?? null, id]
+  )
+
+  await db.query(
+    `UPDATE order_items SET quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
+    [quantity, unitPrice, totalAmount, id]
+  )
+
+  res.json({ ok: true })
+}
