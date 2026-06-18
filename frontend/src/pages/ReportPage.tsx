@@ -26,6 +26,8 @@ export default function ReportPage() {
   const [searchCustomer, setSearchCustomer] = useState('')
   const [searchLoading, setSearchLoading] = useState(false)
   const [_searchActionId, setSearchActionId] = useState<number | null>(null)
+  const [expandedCustomerId, setExpandedCustomerId] = useState<number | null>(null)
+  const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})  const [customerHistoryLoading, setCustomerHistoryLoading] = useState<number | null>(null)
   const [today, setToday] = useState<any>(null)
   const [monthData, setMonthData] = useState<any>(null)
   const [selectedMonth, setSelectedMonth] = useState(getMonthOptions()[0].value)
@@ -53,6 +55,29 @@ export default function ReportPage() {
     setSearchActionId(id)
     try { await api.updateOrderStatus(id, status); searchOrderHistory() }
     finally { setSearchActionId(null) }
+  }
+
+  async function loadCustomerHistory(customerId: number) {
+    if (customerHistory[customerId]) {
+      setExpandedCustomerId(expandedCustomerId === customerId ? null : customerId)
+      return
+    }
+    setCustomerHistoryLoading(customerId)
+    try {
+      const [ordersRes, customerRes] = await Promise.all([
+        api.getOrders({ customerId, all: true, limit: 200 }),
+        api.getCustomers ? api.getCustomers(customerId) : Promise.resolve(null)
+      ])
+      const orders = ordersRes.orders.filter((o: any) => o.status !== 'CANCELLED')
+      const totalCylinders = orders.reduce((s: number, o: any) => s + Number(o.quantity), 0)
+      setCustomerHistory(prev => ({
+        ...prev,
+        [customerId]: { orders, totalCylinders }
+      }))
+      setExpandedCustomerId(customerId)
+    } finally {
+      setCustomerHistoryLoading(null)
+    }
   }
 
   async function searchOrderHistory() {
@@ -284,9 +309,15 @@ export default function ReportPage() {
               <div className="text-sm text-gray-500">{searchDate ? `${searchDate} ` : ''}共 {searchOrders.length} 筆</div>
               {searchOrders.map((o: any) => (
                 <div key={o.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                  <div className="flex justify-between items-start">
+                  <div
+                    className="flex justify-between items-start cursor-pointer"
+                    onClick={() => o.customer_id && loadCustomerHistory(o.customer_id)}
+                  >
                     <div>
-                      <div className="font-medium text-gray-800">{o.customer_name}</div>
+                      <div className="font-medium text-gray-800 flex items-center gap-1">
+                        {o.customer_name}
+                        <span className="text-xs text-gray-400">{expandedCustomerId === o.customer_id ? '▲' : '▼'}</span>
+                      </div>
                       <div className="text-xs text-gray-500 mt-0.5">{new Date(o.created_at).toLocaleDateString('zh-TW')} · {o.customer_address}</div>
                       <div className="text-xs text-gray-500 mt-0.5">
                         {o.items?.length > 0
@@ -305,6 +336,47 @@ export default function ReportPage() {
                       </div>
                     </div>
                   </div>
+                  {expandedCustomerId === o.customer_id && (
+                    <div className="mt-2 pt-2 border-t border-gray-100 space-y-2">
+                      {customerHistoryLoading === o.customer_id ? (
+                        <div className="text-xs text-gray-400 text-center py-2">載入中...</div>
+                      ) : customerHistory[o.customer_id] ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-blue-50 rounded-lg p-2 text-center">
+                              <div className="text-xs text-gray-500">累計桶數</div>
+                              <div className="font-bold text-blue-600">{customerHistory[o.customer_id].totalCylinders} 桶</div>
+                            </div>
+                            <div className="bg-orange-50 rounded-lg p-2 text-center">
+                              <div className="text-xs text-gray-500">訂單筆數</div>
+                              <div className="font-bold text-orange-500">{customerHistory[o.customer_id].orders.length} 筆</div>
+                            </div>
+                          </div>
+                          <div className="text-xs text-gray-500 font-medium">歷史訂單</div>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {customerHistory[o.customer_id].orders.map((h: any) => (
+                              <div key={h.id} className="flex justify-between items-center text-xs py-1 border-b border-gray-50">
+                                <div>
+                                  <span className="text-gray-600">{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
+                                  <span className="text-gray-400 ml-2">
+                                    {h.items?.length > 0
+                                      ? h.items.map((i: any) => `${i.gas_type.replace('BOTTLED_','').replace('KG','kg')}×${i.quantity}`).join('+')
+                                      : `${h.quantity}桶`}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-medium text-gray-700">${Number(h.total_amount).toLocaleString()}</span>
+                                  <span className={`ml-1 ${h.payment_type === 'AR' ? 'text-red-400' : 'text-green-500'}`}>
+                                    {h.payment_type === 'AR' ? '欠' : '現'}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
                     {o.status === 'PENDING' && (
                       <button onClick={async () => { await api.updateOrderStatus(o.id, 'DELIVERING'); searchOrderHistory() }} className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium py-1.5 rounded-lg transition">🚛 出發</button>
