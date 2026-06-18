@@ -198,21 +198,33 @@ export async function confirmDraft(req: Request, res: Response) {
   if (!rows[0]) return res.status(404).json({ error: '草稿不存在' })
 
   const order = rows[0]
-  const finalQty = quantity || order.quantity
-  const finalPrice = unitPrice || order.unit_price
+  const finalQty = Number(quantity) || order.quantity
+  const finalPrice = Number(unitPrice) || order.unit_price
   const finalTotal = finalQty * finalPrice
+  const finalGasType = gasType || '20kg'
+
+  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, id })
 
   await db.query(
     `UPDATE orders SET status = 'PENDING', payment_type = ?, note = ?, quantity = ?, unit_price = ?, total_amount = ? WHERE id = ?`,
     [paymentType || order.payment_type, note || order.note, finalQty, finalPrice, finalTotal, id]
   )
 
-  const finalGasType = gasType || '20kg'
-  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, id })
-  await db.query(
-    `UPDATE order_items SET gas_type = ?, quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
-    [finalGasType, finalQty, finalPrice, finalTotal, id]
-  )
+  const [existingItems] = await db.query(
+    `SELECT id FROM order_items WHERE order_id = ?`, [id]
+  ) as any
+
+  if (existingItems.length > 0) {
+    await db.query(
+      `UPDATE order_items SET gas_type = ?, quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
+      [finalGasType, finalQty, finalPrice, finalTotal, id]
+    )
+  } else {
+    await db.query(
+      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+      [id, finalGasType, finalQty, finalPrice, finalTotal]
+    )
+  }
 
   if ((paymentType || order.payment_type) === 'AR') {
     await db.query(
