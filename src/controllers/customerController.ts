@@ -80,6 +80,7 @@ export async function hardDeleteCustomer(req: Request, res: Response) {
     return res.status(400).json({ error: `此客戶有 ${orders[0].cnt} 筆訂單記錄，無法刪除。請改用停用。` })
   }
   await db.query('DELETE FROM ar_balances WHERE customer_id = ?', [id])
+  await db.query('DELETE FROM gas_returns WHERE customer_id = ?', [id])
   await db.query('DELETE FROM customers WHERE id = ?', [id])
   res.json({ ok: true })
 }
