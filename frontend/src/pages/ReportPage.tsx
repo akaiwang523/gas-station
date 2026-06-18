@@ -65,9 +65,8 @@ export default function ReportPage() {
     }
     setCustomerHistoryLoading(customerId)
     try {
-      const [ordersRes, customerRes] = await Promise.all([
+      const [ordersRes] = await Promise.all([
         api.getOrders({ customerId, all: true, limit: 200 }),
-        api.getCustomers ? api.getCustomers(customerId) : Promise.resolve(null)
       ])
       const orders = ordersRes.orders.filter((o: any) => o.status !== 'CANCELLED')
       const totalCylinders = orders.reduce((s: number, o: any) => s + Number(o.quantity), 0)
