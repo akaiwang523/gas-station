@@ -45,6 +45,14 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
 
+  // 展開編輯
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [editQty, setEditQty] = useState('')
+  const [editPrice, setEditPrice] = useState('')
+  const [editNote, setEditNote] = useState('')
+  const [editLoading, setEditLoading] = useState(false)
+  const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
+
   async function load() {
     setLoading(true)
     try {
@@ -53,7 +61,6 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
       setOrders(res.orders)
       setSummary(sum)
-      // 查各訂單客戶的待處理存氣
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
       const map: Record<number, any[]> = {}
       await Promise.all(customerIds.map(async (cid: any) => {
@@ -70,6 +77,38 @@ export default function OrderList({ refresh }: { refresh?: number }) {
 
   useEffect(() => { load() }, [filter, refresh])
 
+  async function toggleExpand(order: Order) {
+    if (expandedId === order.id) { setExpandedId(null); return }
+    setExpandedId(order.id)
+    setEditQty(String(order.quantity))
+    setEditPrice(String(order.unit_price))
+    setEditNote(order.note || '')
+    // 拿上次叫貨紀錄
+    if (!customerHistory[order.customer_id]) {
+      try {
+        const res = await api.getOrders({ customerId: order.customer_id, all: true, limit: 5 })
+        const prev = res.orders.filter((o: any) => o.id !== order.id && o.status !== 'CANCELLED' && o.status !== 'DRAFT')
+        setCustomerHistory(h => ({ ...h, [order.customer_id]: prev }))
+      } catch {}
+    }
+  }
+
+  async function saveEdit(order: Order) {
+    setEditLoading(true)
+    try {
+      const qty = Number(editQty)
+      const price = Number(editPrice)
+      const total = qty * price
+      await api.updateOrder(order.id, { quantity: qty, unitPrice: price, totalAmount: total, note: editNote })
+      setExpandedId(null)
+      await load()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setEditLoading(false)
+    }
+  }
+
   async function markDelivering(id: number) {
     setActionId(id)
     try { await api.updateOrderStatus(id, 'DELIVERING'); await load() }
@@ -85,7 +124,6 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         await api.updateOrderStatus(order.id, 'DELIVERED')
       }
       await load()
-      // 完成後詢問是否登記存氣
       setReturnModal({ orderId: order.id, customerId: order.customer_id, customerName: order.customer_name })
       setReturnKg('')
       setReturnAction('RECORD')
@@ -172,47 +210,103 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         <div className="space-y-3">
           {pending.map(order => (
             <div key={order.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <span className="font-bold text-gray-800">{order.customer_name}</span>
-                  <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
+              {/* 卡片主體 - 點擊展開 */}
+              <div className="cursor-pointer" onClick={() => toggleExpand(order)}>
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <span className="font-bold text-gray-800">{order.customer_name}</span>
+                    <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
+                    <span className="text-gray-400 text-sm">{expandedId === order.id ? '▲' : '▼'}</span>
+                  </div>
                 </div>
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
-              </div>
-              <div className="text-sm text-gray-600 mb-1">📍 {order.customer_address}</div>
-              <div className="flex gap-3 text-sm text-gray-700 mb-1">
-                {order.items && order.items.length > 0 ? (
-                  <span>🪣 {order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
-                ) : (
-                  <span>🪣 {order.quantity} 桶</span>
+                <div className="text-sm text-gray-600 mb-1">📍 {order.customer_address}</div>
+                <div className="flex gap-3 text-sm text-gray-700 mb-1">
+                  {order.items && order.items.length > 0 ? (
+                    <span>🪣 {order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
+                  ) : (
+                    <span>🪣 {order.quantity} 桶</span>
+                  )}
+                  <span>💰 ${Number(order.total_amount).toLocaleString()}</span>
+                  <span className={order.payment_type === 'AR' ? 'text-red-500 font-medium' : 'text-green-600'}>
+                    {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
+                  </span>
+                </div>
+                {order.note && <div className="text-sm text-orange-600 mb-1">📝 {order.note}</div>}
+                {returnsMap[order.customer_id]?.[0] && (
+                  <div className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 flex justify-between items-center">
+                    <span>⚠️ 上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg</span>
+                    {Number(returnsMap[order.customer_id][0].amount) > 0
+                      ? <span className="text-yellow-700 font-medium">{returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} ${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}</span>
+                      : <span className="text-yellow-600 text-xs">{returnsMap[order.customer_id][0].action === 'RECORD' ? '只記錄' : ''}</span>
+                    }
+                  </div>
                 )}
-                <span>💰 ${Number(order.total_amount).toLocaleString()}</span>
-                <span className={order.payment_type === 'AR' ? 'text-red-500 font-medium' : 'text-green-600'}>
-                  {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
-                </span>
               </div>
-              {order.note && <div className="text-sm text-orange-600 mb-2">📝 {order.note}</div>}
-              {returnsMap[order.customer_id]?.[0] && (
-                <div className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 mb-2 flex justify-between items-center">
-                  <span>⚠️ 上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg</span>
-                  {Number(returnsMap[order.customer_id][0].amount) > 0
-                    ? <span className="text-yellow-700 font-medium">{returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} ${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}</span>
-                    : <span className="text-yellow-600 text-xs">{returnsMap[order.customer_id][0].action === 'RECORD' ? '只記錄' : ''}</span>
-                  }
+
+              {/* 展開區塊 */}
+              {expandedId === order.id && (
+                <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+                  {/* 上次叫貨 */}
+                  {customerHistory[order.customer_id]?.length > 0 && (
+                    <div className="bg-blue-50 rounded-lg p-2.5 space-y-1">
+                      <div className="text-xs font-medium text-blue-700">📅 上次叫貨</div>
+                      {customerHistory[order.customer_id].slice(0, 3).map((h: any) => (
+                        <div key={h.id} className="flex justify-between text-xs text-blue-600">
+                          <span>{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
+                          <span>{h.items?.length > 0 ? h.items.map((i: any) => `${GAS_LABELS[i.gas_type] || i.gas_type}×${i.quantity}`).join('+') : `${h.quantity}桶`}</span>
+                          <span>${Number(h.total_amount).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 編輯欄位 */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">桶數</label>
+                      <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        value={editQty} onChange={e => setEditQty(e.target.value)} onClick={e => e.stopPropagation()} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">單價</label>
+                      <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        value={editPrice} onChange={e => setEditPrice(e.target.value)} onClick={e => e.stopPropagation()} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">合計：${(Number(editQty) * Number(editPrice)).toLocaleString()}</label>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">備註</label>
+                    <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      value={editNote} onChange={e => setEditNote(e.target.value)} onClick={e => e.stopPropagation()} />
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); saveEdit(order) }} disabled={editLoading}
+                    className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
+                    {editLoading ? '儲存中...' : '💾 儲存修改'}
+                  </button>
                 </div>
               )}
+
+              {/* 操作按鈕 */}
               <div className="flex gap-2 mt-3">
                 {order.status === 'PENDING' && (
-                  <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id} className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
+                  <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
                     🚛 出發
                   </button>
                 )}
                 {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                  <button onClick={() => markDelivered(order)} disabled={actionId === order.id} className="flex-1 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
+                  <button onClick={e => { e.stopPropagation(); markDelivered(order) }} disabled={actionId === order.id}
+                    className="flex-1 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
                     ✅ 完成送達
                   </button>
                 )}
-                <button onClick={() => cancelOrder(order.id)} disabled={actionId === order.id} className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
+                <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
+                  className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
                   取消
                 </button>
               </div>
@@ -254,6 +348,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       )}
 
       {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-12">今日暫無訂單</div>}
+
       {/* 存氣登記 Modal */}
       {returnModal && (
         <div className="fixed inset-0 bg-black/50 flex items-end z-50">
