@@ -1,42 +1,15 @@
-import express from 'express'
-import cors from 'cors'
-import dotenv from 'dotenv'
-import path from 'path'
-import { customerRoutes } from './routes/customers'
-import { authRoutes } from './routes/auth'
-import { callerRoutes } from './routes/caller'
-import { orderRoutes } from './routes/orders'
-import { arRoutes } from './routes/ar'
-import { reportRoutes } from './routes/reports'
-import { gasReturnRoutes } from './routes/gasReturns'
-import { errorHandler } from './middleware/errorHandler'
+FROM node:20-slim
+RUN apt-get update && apt-get install -y openssl libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
 
-dotenv.config()
+# 先 build 前端，產生最新的 frontend/dist
+WORKDIR /src/frontend
+RUN npm install
+RUN npm run build
 
-const app = express()
-const PORT = process.env.PORT || 8080
-
-app.use(cors({ origin: '*', credentials: true }))
-app.use(express.json())
-
-app.get('/health', (_req, res) => res.json({ ok: true }))
-app.use('/api/auth', authRoutes)
-app.use('/api/customers', customerRoutes)
-app.use('/api/caller', callerRoutes)
-app.use('/api/orders', orderRoutes)
-app.use('/api/ar', arRoutes)
-app.use('/api/reports', reportRoutes)
-app.use('/api/gas-returns', gasReturnRoutes)
-
-// Serve frontend
-const frontendDist = path.join(__dirname, '../frontend/dist')
-app.use(express.static(frontendDist))
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(frontendDist, 'index.html'))
-})
-
-app.use(errorHandler)
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`)
-})
+# 回到 server 根目錄，安裝後端依賴並啟動
+WORKDIR /src
+RUN npm install
+EXPOSE 8080
+CMD ["node_modules/.bin/tsx", "src/index.ts"]
