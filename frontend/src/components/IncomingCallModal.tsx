@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 
 const POLL_INTERVAL = 4000
 
@@ -41,45 +41,53 @@ export default function IncomingCallModal() {
   const shownUnknownPhone = useRef<string | null>(null)
   const token = localStorage.getItem('token')
 
+  // 抽成共用函式：輪詢計時器跟「確認/取消後立刻檢查下一筆」都呼叫這個
+  const poll = useCallback(async () => {
+    if (!token) return
+    try {
+      const res = await fetch('/api/caller/draft', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+
+      if (data.draft) {
+        if (data.draft.id !== shownDraftId.current) {
+          shownDraftId.current = data.draft.id
+          shownUnknownPhone.current = null
+          setDraft(data.draft)
+          setUnknownPhone(null)
+          setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
+          setEditQty(data.draft.items?.[0]?.quantity || 1)
+          setEditPrice(data.draft.items?.[0]?.unitPrice || 800)
+          setEditGasType(data.draft.items?.[0]?.gasType || '20kg')
+          setVisible(true)
+        }
+      } else if (data.unknownPhone) {
+        if (data.unknownPhone !== shownUnknownPhone.current) {
+          shownUnknownPhone.current = data.unknownPhone
+          shownDraftId.current = null
+          setUnknownPhone(data.unknownPhone)
+          setDraft(null)
+          setNewName('')
+          setNewAddress('')
+          setVisible(true)
+        }
+      } else {
+        // 目前沒有任何待處理草稿/陌生來電，重設記錄，避免漏接下一筆新進來的同 ID 情況
+        shownDraftId.current = null
+        shownUnknownPhone.current = null
+      }
+    } catch {
+      // 靜默失敗
+    }
+  }, [token])
+
   useEffect(() => {
     if (!token) return
-
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/caller/draft', {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        const data = await res.json()
-
-        if (data.draft) {
-          if (data.draft.id !== shownDraftId.current) {
-            shownDraftId.current = data.draft.id
-            shownUnknownPhone.current = null
-            setDraft(data.draft)
-            setUnknownPhone(null)
-            setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
-            setVisible(true)
-          }
-        } else if (data.unknownPhone) {
-          if (data.unknownPhone !== shownUnknownPhone.current) {
-            shownUnknownPhone.current = data.unknownPhone
-            shownDraftId.current = null
-            setUnknownPhone(data.unknownPhone)
-            setDraft(null)
-            setNewName('')
-            setNewAddress('')
-            setVisible(true)
-          }
-        }
-      } catch {
-        // 靜默失敗
-      }
-    }
-
     setTimeout(poll, 1000) // 延遲1秒等token準備好
     const timer = setInterval(poll, POLL_INTERVAL)
     return () => clearInterval(timer)
-  }, [token])
+  }, [token, poll])
 
   async function handleConfirm() {
     if (!draft) return
@@ -95,7 +103,10 @@ export default function IncomingCallModal() {
       })
       setVisible(false)
       setDraft(null)
+      shownDraftId.current = null
       window.dispatchEvent(new Event('order-refresh'))
+      // 立刻檢查有沒有下一筆排隊中的草稿，不用等下一次輪詢
+      poll()
     } finally {
       setLoading(false)
     }
@@ -112,7 +123,10 @@ export default function IncomingCallModal() {
     } finally {
       setVisible(false)
       setDraft(null)
+      shownDraftId.current = null
       setLoading(false)
+      // 立刻檢查有沒有下一筆排隊中的草稿
+      poll()
     }
   }
 
@@ -147,6 +161,8 @@ export default function IncomingCallModal() {
       setVisible(false)
       setUnknownPhone(null)
       setLoading(false)
+      // 立刻檢查有沒有下一筆排隊中的草稿/來電
+      poll()
     }
   }
 
