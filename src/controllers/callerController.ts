@@ -91,35 +91,56 @@ export async function incomingCall(req: Request, res: Response) {
 
   const c = rows[0]
 
-  const [lastOrders] = await db.query(
-    `SELECT o.*, oi.gas_type, oi.quantity, oi.unit_price
-     FROM orders o
-     JOIN order_items oi ON oi.order_id = o.id
-     WHERE o.customer_id = ? AND o.status = 'DELIVERED'
-     ORDER BY o.created_at DESC LIMIT 1`,
+  // 同一客戶若已經有一筆尚未處理的草稿單，就不重複建單，沿用既有那筆
+  const [existingDrafts] = await db.query(
+    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
     [c.id]
   ) as any
 
-  const lastOrder = lastOrders[0]
+  let draftId: number
 
-  const gasType = lastOrder?.gas_type || c.gas_type || '20kg'
-  const quantity = lastOrder?.quantity || 1
-  const unitPrice = c.price_override || lastOrder?.unit_price || 800
-  const totalAmount = quantity * unitPrice
+  if (existingDrafts[0]) {
+    draftId = existingDrafts[0].id
+    // 標記為「再次來電」，更新時間，內容維持原樣讓司機自己確認
+    await db.query(
+      `UPDATE orders SET note = CONCAT(COALESCE(note, ''), '（再次來電 ', ?, '）'), updated_at = NOW() WHERE id = ?`,
+      [new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }), draftId]
+    )
+  } else {
+    const [lastOrders] = await db.query(
+      `SELECT o.*, oi.gas_type, oi.quantity, oi.unit_price
+       FROM orders o
+       JOIN order_items oi ON oi.order_id = o.id
+       WHERE o.customer_id = ? AND o.status = 'DELIVERED'
+       ORDER BY o.created_at DESC LIMIT 1`,
+      [c.id]
+    ) as any
 
-  const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
-     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?)`,
-    [c.id, quantity, unitPrice, totalAmount, `來電自動草稿 ${normalized}`]
-  ) as any
+    const lastOrder = lastOrders[0]
 
-  const draftId = result.insertId
+    const gasType = lastOrder?.gas_type || c.gas_type || '20kg'
+    const quantity = lastOrder?.quantity || 1
+    const unitPrice = c.price_override || lastOrder?.unit_price || 800
+    const totalAmount = quantity * unitPrice
 
-  await db.query(
-    `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
-     VALUES (?, ?, ?, ?, ?)`,
-    [draftId, gasType, quantity, unitPrice, totalAmount]
-  )
+    const [result] = await db.query(
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
+       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?)`,
+      [c.id, quantity, unitPrice, totalAmount, `來電自動草稿 ${normalized}`]
+    ) as any
+
+    draftId = result.insertId
+
+    await db.query(
+      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
+       VALUES (?, ?, ?, ?, ?)`,
+      [draftId, gasType, quantity, unitPrice, totalAmount]
+    )
+  }
+
+  const [draftRow] = await db.query('SELECT * FROM orders WHERE id = ?', [draftId]) as any
+  const [items] = await db.query('SELECT * FROM order_items WHERE order_id = ?', [draftId]) as any
+  const order = draftRow[0]
 
   return res.json({
     found: true,
@@ -130,53 +151,63 @@ export async function incomingCall(req: Request, res: Response) {
         address: c.address, note: c.note,
         amountOwed: c.amount_owed ?? 0,
       },
-      items: [{ gasType, quantity, unitPrice, subtotal: totalAmount }],
-      totalAmount,
-      paymentType: 'CASH',
+      items: items.map((i: any) => ({
+        gasType: i.gas_type, quantity: i.quantity, unitPrice: i.unit_price, subtotal: i.subtotal,
+      })),
+      totalAmount: order.total_amount,
+      paymentType: order.payment_type,
     },
   })
 }
 
 export async function getDraft(_req: Request, res: Response) {
-  // 先查資料庫有沒有 DRAFT 訂單
+  // 撈出「所有」尚未處理的草稿單（不再只抓最新一筆），依建立時間由舊到新排序
   const [rows] = await db.query(
     `SELECT o.*, 
       c.name as customer_name, c.phone as customer_phone,
-      c.address as customer_address, c.note as customer_note
+      c.address as customer_address, c.note as customer_note,
+      a.amount_owed
      FROM orders o
      JOIN customers c ON c.id = o.customer_id
+     LEFT JOIN ar_balances a ON a.customer_id = c.id
      WHERE o.status = 'DRAFT'
-     ORDER BY o.created_at DESC LIMIT 1`
+     ORDER BY o.created_at ASC`
   ) as any
 
-  if (rows[0]) {
-    const order = rows[0]
-    const [items] = await db.query(
-      'SELECT * FROM order_items WHERE order_id = ?',
-      [order.id]
+  if (rows.length > 0) {
+    const orderIds = rows.map((o: any) => o.id)
+    const placeholders = orderIds.map(() => '?').join(',')
+    const [allItems] = await db.query(
+      `SELECT * FROM order_items WHERE order_id IN (${placeholders})`,
+      orderIds
     ) as any
 
-    return res.json({
-      draft: {
-        id: order.id,
-        customer: {
-          id: order.customer_id,
-          name: order.customer_name,
-          phone: order.customer_phone,
-          address: order.customer_address,
-          note: order.customer_note,
-          amountOwed: order.amount_owed ?? 0,
-        },
-        items: items.map((i: any) => ({
+    const drafts = rows.map((order: any) => ({
+      id: order.id,
+      customer: {
+        id: order.customer_id,
+        name: order.customer_name,
+        phone: order.customer_phone,
+        address: order.customer_address,
+        note: order.customer_note,
+        amountOwed: order.amount_owed ?? 0,
+      },
+      items: allItems
+        .filter((i: any) => i.order_id === order.id)
+        .map((i: any) => ({
           gasType: i.gas_type,
           quantity: i.quantity,
           unitPrice: i.unit_price,
           subtotal: i.subtotal,
         })),
-        totalAmount: order.total_amount,
-        paymentType: order.payment_type,
-        createdAt: order.created_at,
-      },
+      totalAmount: order.total_amount,
+      paymentType: order.payment_type,
+      createdAt: order.created_at,
+    }))
+
+    return res.json({
+      draft: drafts[0],   // 保留舊欄位相容：最早那筆（先到的客戶優先處理）
+      drafts,             // 完整草稿佇列，前端可改用這個顯示所有待處理來電
       unknownPhone: null,
     })
   }
@@ -184,10 +215,10 @@ export async function getDraft(_req: Request, res: Response) {
   // 沒有草稿單，看有沒有陌生來電（5分鐘內有效）
   const fiveMin = 5 * 60 * 1000
   if (unknownCallerPhone && Date.now() - unknownCallerTime < fiveMin) {
-    return res.json({ draft: null, unknownPhone: unknownCallerPhone })
+    return res.json({ draft: null, drafts: [], unknownPhone: unknownCallerPhone })
   }
 
-  return res.json({ draft: null, unknownPhone: null })
+  return res.json({ draft: null, drafts: [], unknownPhone: null })
 }
 
 export async function confirmDraft(req: Request, res: Response) {
@@ -262,6 +293,16 @@ export async function incomingCallById(req: Request, res: Response) {
 
   const c = rows[0]
 
+  // 同一客戶若已經有未處理的草稿單，直接沿用，不重複建立
+  const [existingDrafts] = await db.query(
+    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
+    [c.id]
+  ) as any
+
+  if (existingDrafts[0]) {
+    return res.json({ ok: true, orderId: existingDrafts[0].id, reused: true })
+  }
+
   const gasType = c.gas_type || '20kg'
   const quantity = 1
   const unitPrice = c.price_override || 800
@@ -281,5 +322,6 @@ export async function incomingCallById(req: Request, res: Response) {
     [orderId, gasType, quantity, unitPrice, totalAmount]
   )
 
-  return res.json({ ok: true, orderId })
+  return res.json({ ok: true, orderId, reused: false })
 }
+
