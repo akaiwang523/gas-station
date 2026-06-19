@@ -61,10 +61,9 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [returnAmount, setReturnAmount] = useState('')
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
-  // 展開編輯
+  // 展開編輯（多品項：每個品項各自一行）
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [editQty, setEditQty] = useState('')
-  const [editPrice, setEditPrice] = useState('')
+  const [editItems, setEditItems] = useState<{ id: number; gasType: string; quantity: string; unitPrice: string }[]>([])
   const [editNote, setEditNote] = useState('')
   const [editLoading, setEditLoading] = useState(false)
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
@@ -113,8 +112,14 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   async function toggleExpand(order: Order) {
     if (expandedId === order.id) { setExpandedId(null); return }
     setExpandedId(order.id)
-    setEditQty(String(order.quantity))
-    setEditPrice(String(order.unit_price))
+    if (order.items && order.items.length > 0) {
+      setEditItems(order.items.map((i: any) => ({
+        id: i.id, gasType: i.gas_type, quantity: String(i.quantity), unitPrice: String(i.unit_price),
+      })))
+    } else {
+      // 沒有品項明細的舊資料，退回用訂單主表的桶數/單價當作單一品項
+      setEditItems([{ id: 0, gasType: 'BOTTLED_20KG', quantity: String(order.quantity), unitPrice: String(order.unit_price) }])
+    }
     setEditNote(order.note || '')
     // 若 load() 階段還沒撈到（例如已完成訂單），補撈一次
     if (!customerHistory[order.customer_id]) {
@@ -128,10 +133,10 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   async function saveEdit(order: Order) {
     setEditLoading(true)
     try {
-      const qty = Number(editQty)
-      const price = Number(editPrice)
-      const total = qty * price
-      await api.updateOrder(order.id, { quantity: qty, unitPrice: price, totalAmount: total, note: editNote })
+      const items = editItems.map(i => ({
+        id: i.id, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
+      }))
+      await api.updateOrder(order.id, { items, note: editNote })
       setExpandedId(null)
       await load()
     } catch (e: any) {
@@ -139,6 +144,14 @@ export default function OrderList({ refresh }: { refresh?: number }) {
     } finally {
       setEditLoading(false)
     }
+  }
+  // 更新編輯中某個品項的某個欄位
+  function updateEditItem(index: number, field: 'quantity' | 'unitPrice', value: string) {
+    setEditItems(items => items.map((it, i) => i === index ? { ...it, [field]: value } : it))
+  }
+  // 編輯區目前所有品項的合計金額
+  function editItemsTotal() {
+    return editItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0)
   }
   async function markDelivering(id: number) {
     setActionId(id)
@@ -300,21 +313,29 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                       ))}
                     </div>
                   )}
-                  {/* 編輯欄位 */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">桶數</label>
-                      <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        value={editQty} onChange={e => setEditQty(e.target.value)} onClick={e => e.stopPropagation()} />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">單價</label>
-                      <input type="number" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        value={editPrice} onChange={e => setEditPrice(e.target.value)} onClick={e => e.stopPropagation()} />
-                    </div>
+                  {/* 編輯欄位：每個品項各自一行 */}
+                  <div className="space-y-2">
+                    {editItems.map((item, idx) => (
+                      <div key={item.id || idx} className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-gray-600 w-12 flex-shrink-0">{GAS_LABELS[item.gasType] || item.gasType}</span>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} onClick={e => e.stopPropagation()} />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} onClick={e => e.stopPropagation()} />
+                        </div>
+                        <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
+                          ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">合計：${(Number(editQty) * Number(editPrice)).toLocaleString()}</label>
+                    <label className="block text-xs text-gray-500 mb-1">合計：${editItemsTotal().toLocaleString()}</label>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">備註</label>

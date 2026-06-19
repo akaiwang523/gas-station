@@ -190,19 +190,34 @@ export async function deleteOrder(req: Request, res: Response) {
 
 export async function updateOrder(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const { quantity, unitPrice, totalAmount, note } = req.body
+  const { items, note } = req.body
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: '缺少品項資料' })
+  }
 
   const [rows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
   if (!rows[0]) return res.status(404).json({ error: '訂單不存在' })
 
-  await db.query(
-    `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
-    [quantity, unitPrice, totalAmount, note ?? null, id]
-  )
+  // 逐筆精準更新每個品項（用 order_items.id 鎖定，避免多品項時互相覆蓋）
+  for (const item of items) {
+    const qty = Number(item.quantity)
+    const price = Number(item.unitPrice)
+    const subtotal = qty * price
+    await db.query(
+      `UPDATE order_items SET quantity = ?, unit_price = ?, subtotal = ? WHERE id = ? AND order_id = ?`,
+      [qty, price, subtotal, item.id, id]
+    )
+  }
+
+  // 從品項加總，回寫到 orders 主表（quantity/unit_price 維持相容用途）
+  const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
+  const totalAmount = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unitPrice), 0)
+  const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
 
   await db.query(
-    `UPDATE order_items SET quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
-    [quantity, unitPrice, totalAmount, id]
+    `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
+    [totalQuantity, avgUnitPrice, totalAmount, note ?? null, id]
   )
 
   res.json({ ok: true })
