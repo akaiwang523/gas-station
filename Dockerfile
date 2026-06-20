@@ -6,6 +6,8 @@ COPY . .
 # 先 build 前端，產生最新的 frontend/dist
 WORKDIR /src/frontend
 RUN npm install
+# 清掉舊的編譯產物與 Vite 快取，避免內容變更但 bundle hash 沒跟著更新
+RUN rm -rf dist node_modules/.vite
 RUN npm run build
 
 # 回到 server 根目錄，安裝後端依賴並啟動
