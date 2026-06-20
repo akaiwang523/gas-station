@@ -16,7 +16,7 @@ type Customer = {
   cylinders_owed: number
   last_delivery: string | null
   delivery_cycle: string | null
-  delivery_day: number | null
+  delivery_day: string | null
   default_order_quantity: number | null
   default_unit_price: number | null
 }
@@ -48,10 +48,15 @@ export default function CustomerPage() {
   const [form, setForm] = useState({
     name: '', phone: '', phone2: '', address: '', district: '',
     gas_type: 'BOTTLED_20KG', price_override: '', note: '',
-    delivery_cycle: 'ON_CALL', delivery_day: '', default_order_quantity: '', default_unit_price: ''
+    delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
   })
+  const [deliveryDays, setDeliveryDays] = useState<number[]>([])
   const [showFixedDelivery, setShowFixedDelivery] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  function toggleDeliveryDay(day: number) {
+    setDeliveryDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
+  }
 
   async function load() {
     setLoading(true)
@@ -69,8 +74,9 @@ export default function CustomerPage() {
     setForm({
       name: '', phone: '', phone2: '', address: '', district: '',
       gas_type: 'BOTTLED_20KG', price_override: '', note: '',
-      delivery_cycle: 'ON_CALL', delivery_day: '', default_order_quantity: '', default_unit_price: ''
+      delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
     })
+    setDeliveryDays([])
     setShowFixedDelivery(false)
     setEditId(null)
     setShowForm(true)
@@ -83,10 +89,14 @@ export default function CustomerPage() {
       gas_type: c.gas_type, price_override: c.price_override ? String(c.price_override) : '',
       note: c.note || '',
       delivery_cycle: c.delivery_cycle || 'ON_CALL',
-      delivery_day: c.delivery_day ? String(c.delivery_day) : '',
       default_order_quantity: c.default_order_quantity ? String(c.default_order_quantity) : '',
       default_unit_price: c.default_unit_price ? String(c.default_unit_price) : '',
     })
+    setDeliveryDays(
+      c.delivery_day
+        ? c.delivery_day.split(',').map(s => Number(s.trim())).filter(n => n >= 1 && n <= 7)
+        : []
+    )
     setShowFixedDelivery(c.delivery_cycle === 'WEEKLY' || c.delivery_cycle === 'MONTHLY_FIXED')
     setEditId(c.id)
     setShowForm(true)
@@ -101,13 +111,13 @@ export default function CustomerPage() {
         gasType: form.gas_type,
       }
       if (showFixedDelivery) {
-        if (!form.delivery_day || !form.default_order_quantity || !form.default_unit_price) {
-          alert('啟用固定配送時，配送日、數量、單價皆為必填')
+        if (deliveryDays.length === 0 || !form.default_order_quantity || !form.default_unit_price) {
+          alert('啟用固定配送時，至少選擇一個配送星期，數量、單價皆為必填')
           setSaving(false)
           return
         }
         data.delivery_cycle = form.delivery_cycle
-        data.delivery_day = Number(form.delivery_day)
+        data.delivery_day = deliveryDays.join(',')
         data.default_order_quantity = Number(form.default_order_quantity)
         data.default_unit_price = Number(form.default_unit_price)
       } else {
@@ -165,7 +175,8 @@ export default function CustomerPage() {
               </div>
               {(c.delivery_cycle === 'WEEKLY' || c.delivery_cycle === 'MONTHLY_FIXED') && c.delivery_day && (
                 <div className="text-xs text-blue-600 mt-1">
-                  📅 {DELIVERY_CYCLE_LABEL[c.delivery_cycle]}・{WEEKDAY_LABEL[c.delivery_day]}
+                  📅 {DELIVERY_CYCLE_LABEL[c.delivery_cycle]}・
+                  {c.delivery_day.split(',').map(d => WEEKDAY_LABEL[Number(d)]).filter(Boolean).join('、')}
                   {c.default_order_quantity ? `・每次${c.default_order_quantity}桶` : ''}
                 </div>
               )}
@@ -260,17 +271,23 @@ export default function CustomerPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">配送星期 *</label>
-                    <select
-                      className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      value={form.delivery_day}
-                      onChange={e => setForm(prev => ({ ...prev, delivery_day: e.target.value }))}
-                    >
-                      <option value="">請選擇</option>
-                      {Object.entries(WEEKDAY_LABEL).map(([num, label]) => (
-                        <option key={num} value={num}>{label}</option>
-                      ))}
-                    </select>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">配送星期 *（可複選）</label>
+                    <div className="grid grid-cols-7 gap-1">
+                      {Object.entries(WEEKDAY_LABEL).map(([num, label]) => {
+                        const day = Number(num)
+                        const active = deliveryDays.includes(day)
+                        return (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => toggleDeliveryDay(day)}
+                            className={`py-2 rounded-lg text-sm font-medium transition ${active ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                          >
+                            {label.replace('週', '')}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
 
                   <div className="flex gap-2">
@@ -315,5 +332,3 @@ export default function CustomerPage() {
     </div>
   )
 }
-// build cache bust 1781942143
-// build cache bust

@@ -8,9 +8,10 @@
  *   本地測試：npx tsx src/scripts/dailyScheduledOrders.ts
  *   正式排程：建議掛在 Zeabur Cron Job，指令同上，建議排每天 06:00 (UTC+8) 執行一次
  *
- * delivery_day 規則（1=週一 ... 7=週日）：
- *   - WEEKLY        : 每週固定該星期幾配送
- *   - MONTHLY_FIXED : 每月「該星期幾第一次出現」的那天配送（即日期 <= 7）
+ * delivery_day 規則（1=週一 ... 7=週日，可逗號分隔存多個星期幾，如 "1,4" 代表週一與週四）：
+ *   - WEEKLY        : 每週固定該星期幾（或多個星期幾）配送
+ *   - MONTHLY_FIXED : 每月「該星期幾第一次出現」的那天配送（即日期 <= 7）；若設定多個星期幾，
+ *                     則每個星期幾各自的當月第一次出現都會配送
  *   - ON_CALL / FLOW_METER : 不在自動排程範圍內，略過
  *
  * 重複建單規則：
@@ -26,7 +27,7 @@ interface FixedCustomer {
   id: number
   name: string
   delivery_cycle: DeliveryCycle
-  delivery_day: number | null
+  delivery_day: string | null
   gas_type: string
   default_order_quantity: number | null
   default_unit_price: number | null
@@ -41,6 +42,15 @@ function isoWeekday(date: Date): number {
 
 function isFirstOccurrenceOfWeekdayThisMonth(date: Date): boolean {
   return date.getDate() <= 7
+}
+
+// delivery_day 可能是單一星期幾("3")或逗號分隔多個星期幾("1,4")，統一解析成數字陣列
+function parseDeliveryDays(deliveryDay: string | null): number[] {
+  if (!deliveryDay) return []
+  return deliveryDay
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
 }
 
 async function run() {
@@ -64,7 +74,8 @@ async function run() {
   console.log(`[dailyScheduledOrders] 共 ${fixedCustomers.length} 位固定配送客戶待檢查`)
 
   const dueToday = fixedCustomers.filter((c) => {
-    if (c.delivery_day !== todayWeekday) return false
+    const days = parseDeliveryDays(c.delivery_day)
+    if (!days.includes(todayWeekday)) return false
     if (c.delivery_cycle === 'WEEKLY') return true
     if (c.delivery_cycle === 'MONTHLY_FIXED') return isFirstOccurrenceOfWeekdayThisMonth(today)
     return false
