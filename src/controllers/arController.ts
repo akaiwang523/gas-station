@@ -213,15 +213,18 @@ export async function receivePayment(req: Request, res: Response) {
 
   const orderId = orderRows[0]?.id
 
-  if (orderId) {
-    // 有訂單就掛收款記錄
-    await db.query(
-      `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
-      [orderId, collectedBy, amount, method, note || null]
-    )
+  // 沒有任何 AR 訂單就不該收款，避免產生孤兒 ar_balances（無訂單卻有金額）
+  if (!orderId) {
+    return res.status(400).json({ error: '此客戶目前無欠帳訂單，無法收款' })
   }
 
-  // 直接更新 ar_balances（不管有沒有訂單都執行）
+  // 有訂單才掛收款記錄
+  await db.query(
+    `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
+    [orderId, collectedBy, amount, method, note || null]
+  )
+
+  // 連動更新 ar_balances
   await db.query(
     `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
     [amount, customerId]

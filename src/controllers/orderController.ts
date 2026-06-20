@@ -63,39 +63,66 @@ export async function createOrder(req: Request, res: Response) {
   const totalAmount = gasTotal + Number(stairFee)
   const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
 
-  const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)
-     VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
-    [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType]
-  ) as any
-
-  const orderId = result.insertId
-
-  // 寫入品項
-  for (const item of items) {
-    const subtotal = Number(item.quantity) * Number(item.unit_price)
-    await db.query(
-      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
-      [orderId, item.gas_type, item.quantity, item.unit_price, subtotal]
-    )
+  if (totalQuantity <= 0) {
+    return res.status(400).json({ error: '訂購數量需大於 0' })
   }
 
-  // 欠帳處理
-  if (paymentType === 'AR') {
-    await db.query(
-      `INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         amount_owed = amount_owed + VALUES(amount_owed),
-         cylinders_owed = cylinders_owed + VALUES(cylinders_owed),
-         updated_at = NOW()`,
-      [customerId, totalAmount, totalQuantity]
-    )
+  // 整筆建單（主表 + 品項 + 欠帳 + 客戶最後配送時間）用同一條連線跑交易，
+  // 任何一步失敗就整體回滾，避免留下半套資料（訂單存在但品項缺漏、或 ar_balances 沒同步更新）
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    // 建單前先確認客戶存在，避免寫入找不到客戶的孤兒訂單
+    const [customerRows] = await conn.query(
+      'SELECT id FROM customers WHERE id = ? FOR UPDATE',
+      [customerId]
+    ) as any
+    if (!customerRows[0]) {
+      await conn.rollback()
+      return res.status(404).json({ error: '客戶不存在' })
+    }
+
+    const [result] = await conn.query(
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
+      [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType]
+    ) as any
+
+    const orderId = result.insertId
+
+    // 寫入品項
+    for (const item of items) {
+      const subtotal = Number(item.quantity) * Number(item.unit_price)
+      await conn.query(
+        `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+        [orderId, item.gas_type, item.quantity, item.unit_price, subtotal]
+      )
+    }
+
+    // 欠帳處理
+    if (paymentType === 'AR') {
+      await conn.query(
+        `INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           amount_owed = amount_owed + VALUES(amount_owed),
+           cylinders_owed = cylinders_owed + VALUES(cylinders_owed),
+           updated_at = NOW()`,
+        [customerId, totalAmount, totalQuantity]
+      )
+    }
+
+    await conn.query('UPDATE customers SET last_delivery = NOW() WHERE id = ?', [customerId])
+
+    await conn.commit()
+    res.status(201).json({ id: orderId, totalAmount })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
-
-  await db.query('UPDATE customers SET last_delivery = NOW() WHERE id = ?', [customerId])
-
-  res.status(201).json({ id: orderId, totalAmount })
 }
 
 export async function updateOrderStatus(req: Request, res: Response) {
@@ -118,24 +145,43 @@ export async function collectPayment(req: Request, res: Response) {
   const { amount, method = 'CASH', note } = req.body
   const collectedBy = (req as any).user.id
 
-  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [orderId]) as any
-  const order = orderRows[0]
-  if (!order) return res.status(404).json({ error: '訂單不存在' })
-
-  await db.query(
-    `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
-    [orderId, collectedBy, amount, method, note || null]
-  )
-
-  if (order.payment_type === 'AR') {
-    await db.query(
-      `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
-      [amount, order.customer_id]
-    )
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: '金額有誤' })
   }
 
-  await db.query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId])
-  res.json({ ok: true })
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    const [orderRows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [orderId]) as any
+    const order = orderRows[0]
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ error: '訂單不存在' })
+    }
+
+    await conn.query(
+      `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
+      [orderId, collectedBy, amount, method, note || null]
+    )
+
+    if (order.payment_type === 'AR') {
+      await conn.query(
+        `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
+        [amount, order.customer_id]
+      )
+    }
+
+    await conn.query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId])
+
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
 }
 
 export async function getTodaySummary(_req: Request, res: Response) {
@@ -156,21 +202,45 @@ export async function getTodaySummary(_req: Request, res: Response) {
 
 export async function cancelOrder(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
-  const order = orderRows[0]
-  if (!order) return res.status(404).json({ error: '訂單不存在' })
-  if (order.status === 'DELIVERED') return res.status(400).json({ error: '已完成訂單無法取消，請使用撤銷' })
 
-  // 如果是欠帳單，回滾 ar_balances
-  if (order.payment_type === 'AR') {
-    await db.query(
-      `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
-      [order.total_amount, order.quantity, order.customer_id]
-    )
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    // 鎖住該筆訂單，避免重複點擊「取消」造成 ar_balances 被扣兩次
+    const [orderRows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]) as any
+    const order = orderRows[0]
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ error: '訂單不存在' })
+    }
+    if (order.status === 'DELIVERED') {
+      await conn.rollback()
+      return res.status(400).json({ error: '已完成訂單無法取消，請使用撤銷' })
+    }
+    if (order.status === 'CANCELLED') {
+      await conn.rollback()
+      return res.status(400).json({ error: '訂單已是取消狀態' })
+    }
+
+    // 如果是欠帳單，回滾 ar_balances
+    if (order.payment_type === 'AR') {
+      await conn.query(
+        `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
+        [order.total_amount, order.quantity, order.customer_id]
+      )
+    }
+
+    await conn.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [id])
+
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
-
-  await db.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [id])
-  res.json({ ok: true })
 }
 
 export async function deleteOrder(req: Request, res: Response) {
