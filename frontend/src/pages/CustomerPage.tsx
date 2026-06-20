@@ -15,6 +15,10 @@ type Customer = {
   amount_owed: number
   cylinders_owed: number
   last_delivery: string | null
+  delivery_cycle: string | null
+  delivery_day: number | null
+  default_order_quantity: number | null
+  default_unit_price: number | null
 }
 
 const GAS_TYPE_LABEL: Record<string, string> = {
@@ -22,6 +26,17 @@ const GAS_TYPE_LABEL: Record<string, string> = {
   BOTTLED_16KG: '16kg桶裝',
   BOTTLED_4KG: '4kg桶裝',
   PIPED: '管道瓦斯',
+}
+
+const WEEKDAY_LABEL: Record<number, string> = {
+  1: '週一', 2: '週二', 3: '週三', 4: '週四', 5: '週五', 6: '週六', 7: '週日',
+}
+
+const DELIVERY_CYCLE_LABEL: Record<string, string> = {
+  ON_CALL: '隨叫隨送',
+  WEEKLY: '每週固定',
+  MONTHLY_FIXED: '每月固定',
+  FLOW_METER: '流量計',
 }
 
 export default function CustomerPage() {
@@ -32,8 +47,10 @@ export default function CustomerPage() {
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState({
     name: '', phone: '', phone2: '', address: '', district: '',
-    gas_type: 'BOTTLED_20KG', price_override: '', note: ''
+    gas_type: 'BOTTLED_20KG', price_override: '', note: '',
+    delivery_cycle: 'ON_CALL', delivery_day: '', default_order_quantity: '', default_unit_price: ''
   })
+  const [showFixedDelivery, setShowFixedDelivery] = useState(false)
   const [saving, setSaving] = useState(false)
 
   async function load() {
@@ -49,7 +66,12 @@ export default function CustomerPage() {
   useEffect(() => { load() }, [])
 
   function openAdd() {
-    setForm({ name: '', phone: '', phone2: '', address: '', district: '', gas_type: 'BOTTLED_20KG', price_override: '', note: '' })
+    setForm({
+      name: '', phone: '', phone2: '', address: '', district: '',
+      gas_type: 'BOTTLED_20KG', price_override: '', note: '',
+      delivery_cycle: 'ON_CALL', delivery_day: '', default_order_quantity: '', default_unit_price: ''
+    })
+    setShowFixedDelivery(false)
     setEditId(null)
     setShowForm(true)
   }
@@ -59,8 +81,13 @@ export default function CustomerPage() {
       name: c.name, phone: c.phone, phone2: c.phone2 || '',
       address: c.address, district: c.district || '',
       gas_type: c.gas_type, price_override: c.price_override ? String(c.price_override) : '',
-      note: c.note || ''
+      note: c.note || '',
+      delivery_cycle: c.delivery_cycle || 'ON_CALL',
+      delivery_day: c.delivery_day ? String(c.delivery_day) : '',
+      default_order_quantity: c.default_order_quantity ? String(c.default_order_quantity) : '',
+      default_unit_price: c.default_unit_price ? String(c.default_unit_price) : '',
     })
+    setShowFixedDelivery(c.delivery_cycle === 'WEEKLY' || c.delivery_cycle === 'MONTHLY_FIXED')
     setEditId(c.id)
     setShowForm(true)
   }
@@ -68,10 +95,27 @@ export default function CustomerPage() {
   async function handleSave() {
     setSaving(true)
     try {
-      const data = {
+      const data: any = {
         ...form,
         priceOverride: form.price_override ? Number(form.price_override) : null,
         gasType: form.gas_type,
+      }
+      if (showFixedDelivery) {
+        if (!form.delivery_day || !form.default_order_quantity || !form.default_unit_price) {
+          alert('啟用固定配送時，配送日、數量、單價皆為必填')
+          setSaving(false)
+          return
+        }
+        data.delivery_cycle = form.delivery_cycle
+        data.delivery_day = Number(form.delivery_day)
+        data.default_order_quantity = Number(form.default_order_quantity)
+        data.default_unit_price = Number(form.default_unit_price)
+      } else {
+        // 沒有啟用固定配送，強制清空相關欄位，避免殘留舊設定被排程誤判
+        data.delivery_cycle = 'ON_CALL'
+        data.delivery_day = null
+        data.default_order_quantity = null
+        data.default_unit_price = null
       }
       if (editId) {
         await api.updateCustomer(editId, data)
@@ -119,6 +163,12 @@ export default function CustomerPage() {
                 {c.price_override && <span>特殊單價 ${c.price_override}</span>}
                 {c.district && <span>{c.district}</span>}
               </div>
+              {(c.delivery_cycle === 'WEEKLY' || c.delivery_cycle === 'MONTHLY_FIXED') && c.delivery_day && (
+                <div className="text-xs text-blue-600 mt-1">
+                  📅 {DELIVERY_CYCLE_LABEL[c.delivery_cycle]}・{WEEKDAY_LABEL[c.delivery_day]}
+                  {c.default_order_quantity ? `・每次${c.default_order_quantity}桶` : ''}
+                </div>
+              )}
               {Number(c.amount_owed) > 0 && (
                 <div className="text-sm text-red-500 mt-1">欠款 ${Number(c.amount_owed).toLocaleString()}</div>
               )}
@@ -182,6 +232,74 @@ export default function CustomerPage() {
                 <option value="BOTTLED_4KG">4kg桶裝</option>
                 <option value="PIPED">管道瓦斯</option>
               </select>
+            </div>
+
+            <div className="border border-gray-200 rounded-xl p-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showFixedDelivery}
+                  onChange={e => setShowFixedDelivery(e.target.checked)}
+                  className="w-4 h-4 accent-orange-500"
+                />
+                <span className="text-sm font-medium text-gray-700">📅 固定配送客戶（自動排程建單）</span>
+              </label>
+
+              {showFixedDelivery && (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">配送頻率</label>
+                    <select
+                      className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      value={form.delivery_cycle}
+                      onChange={e => setForm(prev => ({ ...prev, delivery_cycle: e.target.value }))}
+                    >
+                      <option value="WEEKLY">每週固定</option>
+                      <option value="MONTHLY_FIXED">每月固定（當月第一次出現該星期）</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">配送星期 *</label>
+                    <select
+                      className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      value={form.delivery_day}
+                      onChange={e => setForm(prev => ({ ...prev, delivery_day: e.target.value }))}
+                    >
+                      <option value="">請選擇</option>
+                      {Object.entries(WEEKDAY_LABEL).map(([num, label]) => (
+                        <option key={num} value={num}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">每次配送桶數 *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        placeholder="例：2"
+                        value={form.default_order_quantity}
+                        onChange={e => setForm(prev => ({ ...prev, default_order_quantity: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">每桶單價 *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        placeholder="例：850"
+                        value={form.default_unit_price}
+                        onChange={e => setForm(prev => ({ ...prev, default_unit_price: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">系統每天會自動檢查，到了配送日會自動建立草稿訂單（待出貨），出貨前仍可調整數量。</p>
+                </div>
+              )}
             </div>
 
             <button
