@@ -85,7 +85,7 @@ export const api = {
   getMonthReport: (month: string) => request(`/reports/month?month=${month}`),
   getStatement: (customerId: number, month?: string) =>
     request(`/ar/${customerId}/statement${month ? `?month=${month}` : ''}`),
-  updateOrder: (id: number, data: { items: { id: number; quantity: number; unitPrice: number }[]; note?: string }) =>
+  updateOrder: (id: number, data: { items: { id?: number; gasType: string; quantity: number; unitPrice: number }[]; note?: string }) =>
     request(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   cancelOrder: (id: number) =>
     request(`/orders/${id}/cancel`, { method: 'PATCH' }),

@@ -131,10 +131,14 @@ export default function OrderList({ refresh }: { refresh?: number }) {
     }
   }
   async function saveEdit(order: Order) {
+    if (editItems.length === 0) {
+      alert('至少需要一個品項')
+      return
+    }
     setEditLoading(true)
     try {
       const items = editItems.map(i => ({
-        id: i.id, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
+        id: i.id || undefined, gasType: i.gasType, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
       }))
       await api.updateOrder(order.id, { items, note: editNote })
       setExpandedId(null)
@@ -146,8 +150,19 @@ export default function OrderList({ refresh }: { refresh?: number }) {
     }
   }
   // 更新編輯中某個品項的某個欄位
-  function updateEditItem(index: number, field: 'quantity' | 'unitPrice', value: string) {
+  function updateEditItem(index: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
     setEditItems(items => items.map((it, i) => i === index ? { ...it, [field]: value } : it))
+  }
+  // 新增一個空白品項（預設 20kg，桶數 1，單價沿用最後一個品項的單價方便快速輸入）
+  function addEditItem() {
+    setEditItems(items => {
+      const lastPrice = items.length > 0 ? items[items.length - 1].unitPrice : ''
+      return [...items, { id: 0, gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: lastPrice }]
+    })
+  }
+  // 移除一個品項（至少保留一個，不能刪到完全沒有品項）
+  function removeEditItem(index: number) {
+    setEditItems(items => items.length <= 1 ? items : items.filter((_, i) => i !== index))
   }
   // 編輯區目前所有品項的合計金額
   function editItemsTotal() {
@@ -313,11 +328,20 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                       ))}
                     </div>
                   )}
-                  {/* 編輯欄位：每個品項各自一行 */}
+                  {/* 編輯欄位：每個品項各自一行，可新增/刪除/改規格 */}
                   <div className="space-y-2">
                     {editItems.map((item, idx) => (
-                      <div key={item.id || idx} className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-gray-600 w-12 flex-shrink-0">{GAS_LABELS[item.gasType] || item.gasType}</span>
+                      <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                        <select
+                          className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          value={item.gasType}
+                          onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {Object.entries(GAS_LABELS).map(([val, label]) => (
+                            <option key={val} value={val}>{label}</option>
+                          ))}
+                        </select>
                         <div className="flex-1">
                           <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
                           <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
@@ -331,8 +355,22 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                         <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
                           ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
                         </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); removeEditItem(idx) }}
+                          disabled={editItems.length <= 1}
+                          className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
+                          title="刪除此品項"
+                        >
+                          ✕
+                        </button>
                       </div>
                     ))}
+                    <button
+                      onClick={e => { e.stopPropagation(); addEditItem() }}
+                      className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
+                    >
+                      ＋ 新增品項（不同規格）
+                    </button>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">合計：${editItemsTotal().toLocaleString()}</label>

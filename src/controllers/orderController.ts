@@ -265,30 +265,75 @@ export async function updateOrder(req: Request, res: Response) {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '缺少品項資料' })
   }
-
-  const [rows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
-  if (!rows[0]) return res.status(404).json({ error: '訂單不存在' })
-
-  // 逐筆精準更新每個品項（用 order_items.id 鎖定，避免多品項時互相覆蓋）
   for (const item of items) {
-    const qty = Number(item.quantity)
-    const price = Number(item.unitPrice)
-    const subtotal = qty * price
-    await db.query(
-      `UPDATE order_items SET quantity = ?, unit_price = ?, subtotal = ? WHERE id = ? AND order_id = ?`,
-      [qty, price, subtotal, item.id, id]
-    )
+    if (!item.gasType) {
+      return res.status(400).json({ error: '每個品項都需要指定瓦斯規格' })
+    }
+    if (!(Number(item.quantity) > 0)) {
+      return res.status(400).json({ error: '每個品項的桶數需大於 0' })
+    }
   }
 
-  // 從品項加總，回寫到 orders 主表（quantity/unit_price 維持相容用途）
-  const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
-  const totalAmount = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unitPrice), 0)
-  const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
 
-  await db.query(
-    `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
-    [totalQuantity, avgUnitPrice, totalAmount, note ?? null, id]
-  )
+    const [rows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]) as any
+    if (!rows[0]) {
+      await conn.rollback()
+      return res.status(404).json({ error: '訂單不存在' })
+    }
 
-  res.json({ ok: true })
+    // 找出目前資料庫裡實際存在的品項 id，用來判斷哪些被使用者刪除了
+    const [existingRows] = await conn.query('SELECT id FROM order_items WHERE order_id = ?', [id]) as any
+    const existingIds = new Set(existingRows.map((r: any) => r.id))
+    const keptIds = new Set<number>()
+
+    for (const item of items) {
+      const qty = Number(item.quantity)
+      const price = Number(item.unitPrice)
+      const subtotal = qty * price
+      const itemId = item.id ? Number(item.id) : 0
+
+      if (itemId && existingIds.has(itemId)) {
+        // 既有品項：更新
+        await conn.query(
+          `UPDATE order_items SET gas_type = ?, quantity = ?, unit_price = ?, subtotal = ? WHERE id = ? AND order_id = ?`,
+          [item.gasType, qty, price, subtotal, itemId, id]
+        )
+        keptIds.add(itemId)
+      } else {
+        // 新品項：新增
+        const [insertResult] = await conn.query(
+          `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+          [id, item.gasType, qty, price, subtotal]
+        ) as any
+        keptIds.add(insertResult.insertId)
+      }
+    }
+
+    // 刪除使用者在前端移除的品項
+    const idsToDelete = [...existingIds].filter((eid) => !keptIds.has(eid as number))
+    if (idsToDelete.length > 0) {
+      await conn.query(`DELETE FROM order_items WHERE id IN (?) AND order_id = ?`, [idsToDelete, id])
+    }
+
+    // 從品項加總，回寫到 orders 主表（quantity/unit_price 維持相容用途，混合規格時 unit_price 為加權平均）
+    const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
+    const totalAmount = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unitPrice), 0)
+    const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
+
+    await conn.query(
+      `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
+      [totalQuantity, avgUnitPrice, totalAmount, note ?? null, id]
+    )
+
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
 }
