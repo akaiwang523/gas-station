@@ -4,8 +4,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "cd frontend && npm install && npm run build",
-    "postinstall": "cd frontend && npm install && npm run build"
+    "build": "cd frontend && npm install --include=dev && npm run build",
+    "postinstall": "cd frontend && npm install --include=dev && npm run build"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
