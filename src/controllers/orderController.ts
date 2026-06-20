@@ -145,24 +145,43 @@ export async function collectPayment(req: Request, res: Response) {
   const { amount, method = 'CASH', note } = req.body
   const collectedBy = (req as any).user.id
 
-  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [orderId]) as any
-  const order = orderRows[0]
-  if (!order) return res.status(404).json({ error: '訂單不存在' })
-
-  await db.query(
-    `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
-    [orderId, collectedBy, amount, method, note || null]
-  )
-
-  if (order.payment_type === 'AR') {
-    await db.query(
-      `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
-      [amount, order.customer_id]
-    )
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: '金額有誤' })
   }
 
-  await db.query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId])
-  res.json({ ok: true })
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    const [orderRows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [orderId]) as any
+    const order = orderRows[0]
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ error: '訂單不存在' })
+    }
+
+    await conn.query(
+      `INSERT INTO payments (order_id, collected_by, amount, method, note) VALUES (?, ?, ?, ?, ?)`,
+      [orderId, collectedBy, amount, method, note || null]
+    )
+
+    if (order.payment_type === 'AR') {
+      await conn.query(
+        `UPDATE ar_balances SET amount_owed = amount_owed - ?, last_payment = NOW() WHERE customer_id = ?`,
+        [amount, order.customer_id]
+      )
+    }
+
+    await conn.query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId])
+
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
 }
 
 export async function getTodaySummary(_req: Request, res: Response) {
@@ -183,21 +202,45 @@ export async function getTodaySummary(_req: Request, res: Response) {
 
 export async function cancelOrder(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const [orderRows] = await db.query('SELECT * FROM orders WHERE id = ?', [id]) as any
-  const order = orderRows[0]
-  if (!order) return res.status(404).json({ error: '訂單不存在' })
-  if (order.status === 'DELIVERED') return res.status(400).json({ error: '已完成訂單無法取消，請使用撤銷' })
 
-  // 如果是欠帳單，回滾 ar_balances
-  if (order.payment_type === 'AR') {
-    await db.query(
-      `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
-      [order.total_amount, order.quantity, order.customer_id]
-    )
+  const conn = await db.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    // 鎖住該筆訂單，避免重複點擊「取消」造成 ar_balances 被扣兩次
+    const [orderRows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]) as any
+    const order = orderRows[0]
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ error: '訂單不存在' })
+    }
+    if (order.status === 'DELIVERED') {
+      await conn.rollback()
+      return res.status(400).json({ error: '已完成訂單無法取消，請使用撤銷' })
+    }
+    if (order.status === 'CANCELLED') {
+      await conn.rollback()
+      return res.status(400).json({ error: '訂單已是取消狀態' })
+    }
+
+    // 如果是欠帳單，回滾 ar_balances
+    if (order.payment_type === 'AR') {
+      await conn.query(
+        `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
+        [order.total_amount, order.quantity, order.customer_id]
+      )
+    }
+
+    await conn.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [id])
+
+    await conn.commit()
+    res.json({ ok: true })
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
-
-  await db.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [id])
-  res.json({ ok: true })
 }
 
 export async function deleteOrder(req: Request, res: Response) {
