@@ -268,7 +268,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                   <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
                   <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
                   <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
-                  
+                  <a
                     href={`tel:${p.customerPhone}`}
                     className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
                   >📞 撥打電話</a>
