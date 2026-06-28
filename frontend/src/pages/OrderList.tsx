@@ -58,6 +58,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [returnModal, setReturnModal] = useState<{orderId: number, customerId: number, customerName: string} | null>(null)
   const [returnKg, setReturnKg] = useState('')
   const [returnAction, setReturnAction] = useState('RECORD')
+  const [predictions, setPredictions] = useState<any[]>([])
   const [returnAmount, setReturnAmount] = useState('')
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
@@ -98,6 +99,10 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         } catch {}
       }))
       setCustomerHistory(histMap)
+      try {
+        const pred = await api.getPredictions()
+        setPredictions(pred.predictions || [])
+      } catch {}
     } finally {
       setLoading(false)
     }
@@ -242,6 +247,36 @@ export default function OrderList({ refresh }: { refresh?: number }) {
           <div className="bg-green-50 rounded-xl p-3 text-center">
             <div className="text-lg font-bold text-green-600">${Number(summary.cash_amount || 0).toLocaleString()}</div>
             <div className="text-xs text-gray-500 mt-0.5">現金收入</div>
+          </div>
+        </div>
+      )}
+      {predictions.length > 0 && (
+        <div className="bg-yellow-50 rounded-xl p-3">
+          <div className="text-sm font-bold text-yellow-800 mb-2">🎯 今日建議配送名單</div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {predictions.map(p => (
+              <div key={p.customerId} className="flex-shrink-0 w-48 bg-white rounded-xl p-3 border border-yellow-200 shadow-sm">
+                <div className="font-bold text-gray-800 text-sm truncate">{p.customerName}</div>
+                <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
+                <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
+                <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
+                <button
+                  className="mt-2 w-full py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg"
+                  onClick={async () => {
+                    try {
+                      const res = await api.createOrder({
+                        customerId: p.customerId,
+                        items: [{ gas_type: p.lastGasType, quantity: p.lastQuantity, unit_price: p.lastUnitPrice }],
+                        paymentType: 'CASH'
+                      })
+                      setPredictions(prev => prev.filter(x => x.customerId !== p.customerId))
+                      setSummary((prev: any) => prev ? { ...prev, total_orders: (prev.total_orders || 0) + 1 } : prev)
+                      setOrders(prev => [res.order, ...prev])
+                    } catch { alert('建單失敗') }
+                  }}
+                >✅ 轉為訂單</button>
+              </div>
+            ))}
           </div>
         </div>
       )}

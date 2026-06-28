@@ -61,6 +61,7 @@ export const api = {
     return request(`/orders?${q}`)
   },
   getTodaySummary: () => request('/orders/summary'),
+  getPredictions: () => request('/predictions'),
   createOrder: (data: any) =>
     request('/orders', { method: 'POST', body: JSON.stringify(data) }),
   updateOrderStatus: (id: number, status: string, driverId?: number) =>
