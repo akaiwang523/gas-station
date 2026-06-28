@@ -53,7 +53,7 @@ function parseDeliveryDays(deliveryDay: string | null): number[] {
     .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
 }
 
-async function run() {
+export async function runDailyScheduledOrders() {
   const today = new Date()
   const todayWeekday = isoWeekday(today)
   const todayStr = today.toISOString().slice(0, 10) // YYYY-MM-DD
@@ -155,9 +155,12 @@ async function run() {
   console.log(`[dailyScheduledOrders] 完成。新建 ${created} 筆，略過 ${skipped} 筆`)
 }
 
-run()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('[dailyScheduledOrders] 執行失敗:', err)
-    process.exit(1)
-  })
+// 直接執行時（npx tsx）才跑，被 import 時不自動執行
+if (require.main === module) {
+  runDailyScheduledOrders()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[dailyScheduledOrders] 執行失敗:', err)
+      process.exit(1)
+    })
+}

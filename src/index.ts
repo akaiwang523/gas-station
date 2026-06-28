@@ -10,6 +10,8 @@ import { arRoutes } from './routes/ar'
 import { reportRoutes } from './routes/reports'
 import { gasReturnRoutes } from './routes/gasReturns'
 import { errorHandler } from './middleware/errorHandler'
+import cron from "node-cron"
+import { runDailyScheduledOrders } from "./scripts/dailyScheduledOrders"
 dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 8080
@@ -30,6 +32,11 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'))
 })
 app.use(errorHandler)
+cron.schedule("0 6 * * *", () => {
+  console.log("[Cron] 執行每日固定配送建單...")
+  runDailyScheduledOrders().catch((err: Error) => console.error("[Cron] 建單失敗:", err))
+}, { timezone: "Asia/Taipei" })
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)
 })
