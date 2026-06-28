@@ -118,7 +118,7 @@ export async function incomingCall(req: Request, res: Response) {
 
     const lastOrder = lastOrders[0]
 
-    const gasType = lastOrder?.gas_type || c.gas_type || '20kg'
+    const gasType = lastOrder?.gas_type || c.gas_type || 'BOTTLED_20KG'
     const quantity = lastOrder?.quantity || 1
     const unitPrice = c.price_override || lastOrder?.unit_price || 800
     const totalAmount = quantity * unitPrice
@@ -232,7 +232,7 @@ export async function confirmDraft(req: Request, res: Response) {
   const finalQty = Number(quantity) || order.quantity
   const finalPrice = Number(unitPrice) || order.unit_price
   const finalTotal = finalQty * finalPrice
-  const finalGasType = gasType || '20kg'
+  const finalGasType = gasType || 'BOTTLED_20KG'
 
   console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, id })
 
@@ -303,7 +303,7 @@ export async function incomingCallById(req: Request, res: Response) {
     return res.json({ ok: true, orderId: existingDrafts[0].id, reused: true })
   }
 
-  const gasType = c.gas_type || '20kg'
+  const gasType = c.gas_type || 'BOTTLED_20KG'
   const quantity = 1
   const unitPrice = c.price_override || 800
   const totalAmount = quantity * unitPrice
