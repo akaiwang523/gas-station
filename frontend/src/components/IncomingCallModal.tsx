@@ -32,7 +32,7 @@ export default function IncomingCallModal() {
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [editQty, setEditQty] = useState(1)
   const [editPrice, setEditPrice] = useState(800)
-  const [editGasType, setEditGasType] = useState('20kg')
+  const [editGasType, setEditGasType] = useState('BOTTLED_20KG')
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -59,7 +59,7 @@ export default function IncomingCallModal() {
           setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
           setEditQty(data.draft.items?.[0]?.quantity || 1)
           setEditPrice(data.draft.items?.[0]?.unitPrice || 800)
-          setEditGasType(data.draft.items?.[0]?.gasType || '20kg')
+          setEditGasType(data.draft.items?.[0]?.gasType || 'BOTTLED_20KG')
           setVisible(true)
         }
       } else if (data.unknownPhone) {
@@ -250,13 +250,13 @@ export default function IncomingCallModal() {
             <div className="text-gray-500 text-xs mb-2">品項（可修改）</div>
             {/* 品項選擇 */}
             <div className="flex gap-2 mb-3">
-              {['20kg','16kg','10kg','4kg'].map(type => (
+              {['BOTTLED_20KG','BOTTLED_16KG','BOTTLED_10KG','BOTTLED_4KG'].map(type => (
                 <button
-                  key={type}
+                  key={type.replace("BOTTLED_","").replace("KG","kg")}
                   onClick={() => setEditGasType(type)}
                   className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editGasType === type ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
                 >
-                  {type}
+                  {type.replace("BOTTLED_","").replace("KG","kg")}
                 </button>
               ))}
             </div>
