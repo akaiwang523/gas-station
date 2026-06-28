@@ -5,7 +5,7 @@ export async function getPredictions(req: Request, res: Response) {
   try {
     // 撈出歷史訂單 >= 3 筆的活躍客戶，取最近 4 筆
     const [customers] = await db.query(
-      `SELECT c.id, c.name,
+      `SELECT c.id, c.name, c.phone,
               (SELECT COUNT(*) FROM orders WHERE customer_id = c.id AND status != 'CANCELLED') as order_count
        FROM customers c
        WHERE c.status = 'ACTIVE'
@@ -48,10 +48,18 @@ export async function getPredictions(req: Request, res: Response) {
       const predictedDay = new Date(predictedDate)
       predictedDay.setHours(0, 0, 0, 0)
 
+      // 排除今天已有訂單的客戶
+      const [todayOrders] = await db.query(
+        `SELECT id FROM orders WHERE customer_id = ? AND DATE(created_at) = ? AND status != 'CANCELLED'`,
+        [customer.id, todayStr]
+      ) as any
+      if ((todayOrders as any[]).length > 0) continue
+
       if (predictedDay >= yesterday && predictedDay <= tomorrow) {
         predictions.push({
           customerId: customer.id,
           customerName: customer.name,
+          customerPhone: customer.phone,
           predictedDate: predictedDate.toISOString().slice(0, 10),
           avgInterval: Math.round(avgInterval),
           lastGasType: orders[0].gas_type,

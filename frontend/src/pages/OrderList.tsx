@@ -59,6 +59,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [returnKg, setReturnKg] = useState('')
   const [returnAction, setReturnAction] = useState('RECORD')
   const [predictions, setPredictions] = useState<any[]>([])
+  const [predExpanded, setPredExpanded] = useState(false)
   const [returnAmount, setReturnAmount] = useState('')
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
@@ -251,33 +252,30 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         </div>
       )}
       {predictions.length > 0 && (
-        <div className="bg-yellow-50 rounded-xl p-3">
-          <div className="text-sm font-bold text-yellow-800 mb-2">🎯 今日建議配送名單</div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {predictions.map(p => (
-              <div key={p.customerId} className="flex-shrink-0 w-48 bg-white rounded-xl p-3 border border-yellow-200 shadow-sm">
-                <div className="font-bold text-gray-800 text-sm truncate">{p.customerName}</div>
-                <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
-                <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
-                <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
-                <button
-                  className="mt-2 w-full py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg"
-                  onClick={async () => {
-                    try {
-                      const res = await api.createOrder({
-                        customerId: p.customerId,
-                        items: [{ gas_type: p.lastGasType, quantity: p.lastQuantity, unit_price: p.lastUnitPrice }],
-                        paymentType: 'CASH'
-                      })
-                      setPredictions(prev => prev.filter(x => x.customerId !== p.customerId))
-                      setSummary((prev: any) => prev ? { ...prev, total_orders: (prev.total_orders || 0) + 1 } : prev)
-                      setOrders(prev => [res.order, ...prev])
-                    } catch { alert('建單失敗') }
-                  }}
-                >✅ 轉為訂單</button>
-              </div>
-            ))}
-          </div>
+        <div className="bg-blue-50 rounded-xl p-3">
+          <button
+            className="w-full flex items-center justify-between"
+            onClick={() => setPredExpanded(prev => !prev)}
+          >
+            <div className="text-sm font-bold text-blue-800">📞 可詢問客戶（預測需補貨）<span className="ml-2 bg-blue-200 text-blue-800 text-xs px-2 py-0.5 rounded-full">{predictions.length}</span></div>
+            <span className="text-blue-400 text-xs">{predExpanded ? '▲ 收合' : '▼ 展開'}</span>
+          </button>
+          {predExpanded && (
+            <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
+              {predictions.map(p => (
+                <div key={p.customerId} className="flex-shrink-0 w-48 bg-white rounded-xl p-3 border border-blue-200 shadow-sm">
+                  <div className="font-bold text-gray-800 text-sm truncate">{p.customerName}</div>
+                  <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
+                  <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
+                  <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
+                  
+                    href={`tel:${p.customerPhone}`}
+                    className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
+                  >📞 撥打電話</a>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       <div className="flex gap-2 overflow-x-auto pb-1">
