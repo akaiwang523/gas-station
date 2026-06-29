@@ -130,8 +130,7 @@ export async function handleLineWebhook(req: Request, res: Response) {
         ) as any
         if (rows.length === 0) {
           userState[userId] = { step: 'waiting_name', phone }
-          await replyMessage(replyToken, [{ type: 'text', text: '您是新客戶，歡迎！
-請輸入您的姓名：' }])
+          await replyMessage(replyToken, [{ type: 'text', text: '您是新客戶，歡迎！\n\n📝 建立帳號（步驟 1/2）\n請輸入您的姓名：' }])
         } else {
           const customer = rows[0]
           await db.query(
@@ -151,8 +150,7 @@ export async function handleLineWebhook(req: Request, res: Response) {
       if (userState[userId]?.step === 'waiting_name') {
         const name = text.trim()
         userState[userId] = { ...userState[userId], step: 'waiting_address', name }
-        await replyMessage(replyToken, [{ type: 'text', text: `謝謝 ${name}！
-請輸入您的配送地址：` }])
+        await replyMessage(replyToken, [{ type: 'text', text: `📝 建立帳號（步驟 2/2）\n請輸入您的配送地址：` }])
         continue
       }
 
@@ -172,8 +170,7 @@ export async function handleLineWebhook(req: Request, res: Response) {
         )
         userState[userId] = {}
         await replyMessage(replyToken, [
-          { type: 'text', text: `✅ 建檔完成！您好，${name}！
-日後可直接使用此帳號訂購。` },
+          { type: 'text', text: `✅ 建檔完成！您好，${name}！\n日後可直接使用此帳號訂購。` },
           mainMenu()
         ])
         continue
