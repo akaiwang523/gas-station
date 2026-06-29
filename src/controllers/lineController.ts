@@ -103,13 +103,14 @@ const userState: Record<string, any> = {}
 
 export async function handleLineWebhook(req: Request, res: Response) {
   const signature = req.headers['x-line-signature'] as string
-  const body = req.body as Buffer
+  const rawBody = JSON.stringify(req.body)
 
-  if (!verifySignature(body, signature)) {
+  const hash = crypto.createHmac('SHA256', CHANNEL_SECRET).update(rawBody).digest('base64')
+  if (hash !== signature) {
     return res.status(401).send('Unauthorized')
   }
 
-  const payload = JSON.parse(body.toString())
+  const payload = req.body
   res.status(200).send('OK')
 
   for (const event of payload.events) {
