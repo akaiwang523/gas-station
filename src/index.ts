@@ -10,6 +10,7 @@ import { arRoutes } from './routes/ar'
 import { reportRoutes } from './routes/reports'
 import { gasReturnRoutes } from './routes/gasReturns'
 import { predictionRoutes } from './routes/predictions'
+import { lineRoutes } from './routes/line'
 import { errorHandler } from './middleware/errorHandler'
 import cron from "node-cron"
 import { runDailyScheduledOrders } from "./scripts/dailyScheduledOrders"
@@ -27,6 +28,7 @@ app.use('/api/ar', arRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/gas-returns', gasReturnRoutes)
 app.use('/api/predictions', predictionRoutes)
+app.use('/api/line', lineRoutes)
 // Serve frontend
 const frontendDist = path.join(__dirname, '../frontend/dist')
 app.use(express.static(frontendDist))
