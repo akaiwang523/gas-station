@@ -60,6 +60,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [returnAction, setReturnAction] = useState('RECORD')
   const [predictions, setPredictions] = useState<any[]>([])
   const [predExpanded, setPredExpanded] = useState(false)
+  const [drafts, setDrafts] = useState<Order[]>([])
   const [returnAmount, setReturnAmount] = useState('')
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
@@ -103,6 +104,10 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       try {
         const pred = await api.getPredictions()
         setPredictions(pred.predictions || [])
+      } catch {}
+      try {
+        const draftRes = await api.getOrders({ status: 'DRAFT' })
+        setDrafts(draftRes.orders || [])
       } catch {}
     } finally {
       setLoading(false)
@@ -248,6 +253,45 @@ export default function OrderList({ refresh }: { refresh?: number }) {
           <div className="bg-green-50 rounded-xl p-3 text-center">
             <div className="text-lg font-bold text-green-600">${Number(summary.cash_amount || 0).toLocaleString()}</div>
             <div className="text-xs text-gray-500 mt-0.5">現金收入</div>
+          </div>
+        </div>
+      )}
+      {drafts.length > 0 && (
+        <div className="bg-orange-50 rounded-xl p-3 border border-orange-200">
+          <div className="text-sm font-bold text-orange-800 mb-2">📞 來電草稿（待確認）<span className="ml-2 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{drafts.length}</span></div>
+          <div className="space-y-2">
+            {drafts.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map(d => (
+              <div key={d.id} className="bg-white rounded-xl p-3 border border-orange-100 flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-gray-800 text-sm truncate">{d.customer_name}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {d.items?.length > 0 ? d.items.map((i:any) => `${i.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${i.quantity}`).join(' + ') : `${d.quantity} 桶`}
+                    　{new Date(d.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'})} 來電
+                  </div>
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  <button
+                    className="px-3 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg"
+                    onClick={async () => {
+                      try {
+                        await api.updateOrderStatus(d.id, 'PENDING')
+                        setDrafts(prev => prev.filter(x => x.id !== d.id))
+                        await load()
+                      } catch { alert('操作失敗') }
+                    }}
+                  >✅ 確認</button>
+                  <button
+                    className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg"
+                    onClick={async () => {
+                      try {
+                        await api.deleteOrder(d.id)
+                        setDrafts(prev => prev.filter(x => x.id !== d.id))
+                      } catch { alert('刪除失敗') }
+                    }}
+                  >🗑</button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
