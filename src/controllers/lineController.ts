@@ -129,7 +129,9 @@ export async function handleLineWebhook(req: Request, res: Response) {
           [phone]
         ) as any
         if (rows.length === 0) {
-          await replyMessage(replyToken, [{ type: 'text', text: '找不到此電話號碼的客戶資料，請確認後再試，或聯絡我們協助。' }])
+          userState[userId] = { step: 'waiting_name', phone }
+          await replyMessage(replyToken, [{ type: 'text', text: '您是新客戶，歡迎！
+請輸入您的姓名：' }])
         } else {
           const customer = rows[0]
           await db.query(
@@ -143,6 +145,37 @@ export async function handleLineWebhook(req: Request, res: Response) {
             mainMenu()
           ])
         }
+        continue
+      }
+
+      if (userState[userId]?.step === 'waiting_name') {
+        const name = text.trim()
+        userState[userId] = { ...userState[userId], step: 'waiting_address', name }
+        await replyMessage(replyToken, [{ type: 'text', text: `謝謝 ${name}！
+請輸入您的配送地址：` }])
+        continue
+      }
+
+      if (userState[userId]?.step === 'waiting_address') {
+        const { phone, name } = userState[userId]
+        const address = text.trim()
+        const [result] = await db.query(
+          `INSERT INTO customers (name, phone, address, gas_type, status, delivery_cycle)
+           VALUES (?, ?, ?, 'BOTTLED_20KG', 'ACTIVE', 'ON_CALL')`,
+          [name, phone, address]
+        ) as any
+        const customerId = (result as any).insertId
+        await db.query(
+          `INSERT INTO line_users (line_user_id, customer_id) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE customer_id = ?`,
+          [userId, customerId, customerId]
+        )
+        userState[userId] = {}
+        await replyMessage(replyToken, [
+          { type: 'text', text: `✅ 建檔完成！您好，${name}！
+日後可直接使用此帳號訂購。` },
+          mainMenu()
+        ])
         continue
       }
 
