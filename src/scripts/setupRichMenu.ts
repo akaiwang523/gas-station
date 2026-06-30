@@ -1,11 +1,28 @@
 import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!
 
 async function main() {
   if (!ACCESS_TOKEN) {
     console.error('缺少 LINE_CHANNEL_ACCESS_TOKEN 環境變數')
     process.exit(1)
+  }
+
+  // 0. 清除舊的 Rich Menu，避免重複執行留下空殼選單
+  console.log('清除舊的 Rich Menu...')
+  const listRes = await fetch('https://api.line.me/v2/bot/richmenu/list', {
+    headers: { 'Authorization': `Bearer ${ACCESS_TOKEN}` }
+  })
+  const listData = await listRes.json() as any
+  for (const menu of listData.richmenus || []) {
+    await fetch(`https://api.line.me/v2/bot/richmenu/${menu.richMenuId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${ACCESS_TOKEN}` }
+    })
+    console.log('已刪除舊選單：', menu.richMenuId)
   }
 
   // 1. 建立 Rich Menu 結構（2500x843，2x2 四宮格）
@@ -51,9 +68,10 @@ async function main() {
   const richMenuId = createData.richMenuId
   console.log('建立成功，richMenuId =', richMenuId)
 
-  // 2. 上傳圖片（請確認 richmenu.png 跟此腳本放在同一層，或自行修改路徑）
+  // 2. 上傳圖片（用腳本自身位置算出絕對路徑，不依賴執行時的工作目錄）
   console.log('上傳圖片中...')
-  const imageBuffer = fs.readFileSync('./richmenu.png')
+  const imagePath = path.join(__dirname, 'richmenu.png')
+  const imageBuffer = fs.readFileSync(imagePath)
   const uploadRes = await fetch(`https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`, {
     method: 'POST',
     headers: {
