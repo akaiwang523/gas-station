@@ -34,8 +34,8 @@ function mainMenu() {
       text: '請選擇您需要的服務',
       actions: [
         { type: 'postback', label: '🛒 我要叫瓦斯', data: 'action=order' },
+        { type: 'postback', label: '⚡ 一鍵叫瓦斯', data: 'action=quick_order' },
         { type: 'postback', label: '📋 查詢訂單狀態', data: 'action=status' },
-        { type: 'postback', label: '❓ 常見問題', data: 'action=faq' },
         { type: 'postback', label: '📞 聯絡我們', data: 'action=contact' }
       ]
     }
@@ -320,15 +320,40 @@ export async function handleLineWebhook(req: Request, res: Response) {
         }
       }
 
-      else if (action === 'faq') {
-        await replyMessage(replyToken, [{
-          type: 'text',
-          text: '❓ 常見問題\n\n🔥 瓦斯品項：\n・20kg 桶裝\n・16kg 桶裝\n・10kg 桶裝\n・4kg 桶裝\n\n🕐 營業時間：\n週一至週六 09:00-20:00\n\n📞 客服電話：\n06-2231668\n06-2264569'
-        }])
+      else if (action === 'quick_order') {
+        const [binding] = await db.query(
+          `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
+        ) as any
+        if (!binding[0]) {
+          userState[userId] = { step: 'waiting_phone' }
+          await replyMessage(replyToken, [{ type: 'text', text: '請先輸入您的電話號碼進行綁定：' }])
+        } else {
+          const customerId = binding[0].customer_id
+          const [lastOrders] = await db.query(
+            `SELECT oi.gas_type, oi.quantity
+             FROM orders o
+             LEFT JOIN order_items oi ON oi.order_id = o.id
+             WHERE o.customer_id = ? AND o.status != 'CANCELLED'
+             ORDER BY o.created_at DESC LIMIT 1`,
+            [customerId]
+          ) as any
+          if (lastOrders.length === 0 || !lastOrders[0].gas_type) {
+            await replyMessage(replyToken, [
+              { type: 'text', text: '您還沒有歷史訂單可以複製，請改用「我要叫瓦斯」下單：' },
+              mainMenu()
+            ])
+          } else {
+            const { gas_type, quantity } = lastOrders[0]
+            await createLineOrder(userId, replyToken, gas_type, quantity, '盡快配送（一鍵再訂）')
+          }
+        }
       }
 
       else if (action === 'contact') {
-        await replyMessage(replyToken, [{ type: 'text', text: '📞 請直接撥打電話聯絡我們，感謝！' }])
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: '🔥 瓦斯品項：\n・20kg 桶裝\n・16kg 桶裝\n・10kg 桶裝\n・4kg 桶裝\n\n🕐 營業時間：\n週一至週六 09:00-20:00\n\n📞 客服電話：\n06-2231668\n06-2264569'
+        }])
       }
     }
 

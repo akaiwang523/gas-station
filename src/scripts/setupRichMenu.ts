@@ -38,11 +38,11 @@ async function main() {
       },
       {
         bounds: { x: 1250, y: 0, width: 1250, height: 421 },
-        action: { type: 'postback', data: 'action=status' }
+        action: { type: 'postback', data: 'action=quick_order' }
       },
       {
         bounds: { x: 0, y: 421, width: 1250, height: 422 },
-        action: { type: 'postback', data: 'action=faq' }
+        action: { type: 'postback', data: 'action=status' }
       },
       {
         bounds: { x: 1250, y: 421, width: 1250, height: 422 },
