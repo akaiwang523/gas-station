@@ -35,6 +35,7 @@ function mainMenu() {
       actions: [
         { type: 'postback', label: '🛒 我要叫瓦斯', data: 'action=order' },
         { type: 'postback', label: '📋 查詢訂單狀態', data: 'action=status' },
+        { type: 'postback', label: '❓ 常見問題', data: 'action=faq' },
         { type: 'postback', label: '📞 聯絡我們', data: 'action=contact' }
       ]
     }
@@ -288,6 +289,13 @@ export async function handleLineWebhook(req: Request, res: Response) {
             await replyMessage(replyToken, [{ type: 'text', text }])
           }
         }
+      }
+
+      else if (action === 'faq') {
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: '❓ 常見問題\n\n🔥 瓦斯品項：\n・20kg 桶裝\n・16kg 桶裝\n・10kg 桶裝\n・4kg 桶裝\n\n🕐 營業時間：\n週一至週六 09:00-20:00\n\n📞 客服電話：\n06-2231668\n06-2264569'
+        }])
       }
 
       else if (action === 'contact') {
