@@ -274,20 +274,49 @@ export async function handleLineWebhook(req: Request, res: Response) {
              FROM orders o
              LEFT JOIN order_items oi ON oi.order_id = o.id
              WHERE o.customer_id = ? AND o.status NOT IN ('CANCELLED','DELIVERED')
-             ORDER BY o.created_at DESC LIMIT 3`,
+             ORDER BY o.created_at DESC LIMIT 1`,
             [binding[0].customer_id]
           ) as any
           if (orders.length === 0) {
             await replyMessage(replyToken, [{ type: 'text', text: '目前沒有進行中的訂單。' }])
           } else {
+            const o = orders[0]
             const STATUS: Record<string, string> = {
               PENDING: '待派送', ASSIGNED: '已指派', DELIVERING: '配送中'
             }
-            const text = orders.map((o: any) =>
-              `訂單 #${o.id}：${o.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${o.quantity} 桶\n狀態：${STATUS[o.status] || o.status}`
-            ).join('\n\n')
-            await replyMessage(replyToken, [{ type: 'text', text }])
+            const summary = `訂單 #${o.id}：${o.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${o.quantity} 桶\n狀態：${STATUS[o.status] || o.status}`
+
+            if (o.status === 'PENDING') {
+              await replyMessage(replyToken, [{
+                type: 'template',
+                altText: summary,
+                template: {
+                  type: 'buttons',
+                  text: summary,
+                  actions: [
+                    { type: 'postback', label: '❌ 取消訂單', data: `action=cancel_order&order_id=${o.id}` }
+                  ]
+                }
+              }])
+            } else if (o.status === 'DELIVERING') {
+              await replyMessage(replyToken, [{ type: 'text', text: '您的瓦斯已出發' }])
+            } else {
+              await replyMessage(replyToken, [{ type: 'text', text: summary }])
+            }
           }
+        }
+      }
+
+      else if (action === 'cancel_order') {
+        const orderId = params.get('order_id')!
+        const [rows] = await db.query(`SELECT status FROM orders WHERE id = ?`, [orderId]) as any
+        if (rows.length === 0) {
+          await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 找不到該筆訂單。' }])
+        } else if (rows[0].status === 'PENDING') {
+          await db.query(`UPDATE orders SET status = 'CANCELLED' WHERE id = ?`, [orderId])
+          await replyMessage(replyToken, [{ type: 'text', text: '✅ 訂單已為您取消。' }])
+        } else {
+          await replyMessage(replyToken, [{ type: 'text', text: '⚠️ 抱歉，司機已經出發，無法直接取消。若需取消請直接點擊下方【聯絡我們】來電通知。' }])
         }
       }
 
