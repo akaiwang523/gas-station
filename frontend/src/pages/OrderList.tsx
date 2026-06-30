@@ -344,9 +344,9 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                     <span className="font-bold text-gray-800">{order.customer_name}</span>
                     <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
-                    <span className="text-gray-400 text-sm">{expandedId === order.id ? '▲' : '▼'}</span>
+                    <span className="text-gray-300 text-xs border-l border-gray-200 pl-2">{expandedId === order.id ? '收合 ▲' : '詳情 ▼'}</span>
                   </div>
                 </div>
                 {lastDelivery && (
@@ -363,16 +363,16 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                   <span className="flex-1">{order.customer_address}</span>
                   <span className="text-blue-500 text-xs whitespace-nowrap">導航 ›</span>
                 </a>
-                <div className="flex justify-between items-end mb-1">
-                  <div className="text-sm text-gray-700">
+                <div className="flex justify-between items-center mb-1">
+                  <div className="text-lg font-bold text-gray-800">
                     {order.items && order.items.length > 0 ? (
                       <span>🪣 {order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
                     ) : (
                       <span>🪣 {order.quantity} 桶</span>
                     )}
                   </div>
-                  <div className="text-right">
-                    <div className="text-xl font-bold text-gray-800 leading-tight">${Number(order.total_amount).toLocaleString()}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-gray-600">${Number(order.total_amount).toLocaleString()}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
                       {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
                     </span>
@@ -380,11 +380,11 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 </div>
                 {order.note && <div className="text-sm text-orange-600 mb-1">📝 {order.note}</div>}
                 {returnsMap[order.customer_id]?.[0] && (
-                  <div className="text-sm bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5 flex justify-between items-center">
-                    <span>⚠️ 上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg</span>
+                  <div className="text-xs text-gray-400 mb-1">
+                    *上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg
                     {Number(returnsMap[order.customer_id][0].amount) > 0
-                      ? <span className="text-yellow-700 font-medium">{returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} ${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}</span>
-                      : <span className="text-yellow-600 text-xs">{returnsMap[order.customer_id][0].action === 'RECORD' ? '只記錄' : ''}</span>
+                      ? `（${returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} $${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}）`
+                      : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''
                     }
                   </div>
                 )}
@@ -465,10 +465,14 @@ export default function OrderList({ refresh }: { refresh?: number }) {
               )}
               {/* 操作按鈕 */}
               <div className="flex gap-2 mt-3">
+                <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
+                  className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
+                  取消
+                </button>
                 {order.status === 'PENDING' && (
                   <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
                     className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
-                    🚛 出發
+                    🚛 開始配送
                   </button>
                 )}
                 {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
@@ -477,10 +481,6 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                     ✅ 完成送達
                   </button>
                 )}
-                <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
-                  className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
-                  取消
-                </button>
               </div>
             </div>
             )
