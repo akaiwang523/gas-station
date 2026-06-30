@@ -366,9 +366,9 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 <div className="flex justify-between items-center mb-1">
                   <div className="text-lg font-bold text-gray-800">
                     {order.items && order.items.length > 0 ? (
-                      <span>🪣 {order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
+                      <span>{order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
                     ) : (
-                      <span>🪣 {order.quantity} 桶</span>
+                      <span>{order.quantity} 桶</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
