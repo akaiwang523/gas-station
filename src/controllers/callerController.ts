@@ -278,6 +278,75 @@ export async function cancelDraft(req: Request, res: Response) {
   return res.json({ ok: true })
 }
 
+// POST /api/caller/bind
+// body: { customerId, phone }
+// 把陌生來電號碼綁定到「既有客戶」（例如 Ragic 匯入、尚未登記電話的舊客戶），
+// 而不是建立一筆重複的新客戶，並直接建立草稿單
+export async function bindCallerToCustomer(req: Request, res: Response) {
+  const { customerId, phone } = req.body
+  if (!customerId) return res.status(400).json({ error: 'customerId required' })
+  if (!phone) return res.status(400).json({ error: 'phone required' })
+
+  const normalized = normalizePhone(phone)
+
+  const [rows] = await db.query(
+    `SELECT c.*, a.amount_owed FROM customers c 
+     LEFT JOIN ar_balances a ON a.customer_id = c.id
+     WHERE c.id = ? AND c.status != 'INACTIVE' LIMIT 1`,
+    [customerId]
+  ) as any
+  if (!rows[0]) return res.status(404).json({ error: '客戶不存在' })
+  const c = rows[0]
+
+  // 確認這支號碼沒有被別的客戶佔用
+  const [dup] = await db.query(
+    'SELECT id FROM customers WHERE (phone = ? OR phone2 = ?) AND id != ?',
+    [normalized, normalized, customerId]
+  ) as any
+  if (dup[0]) return res.status(409).json({ error: '這支號碼已經綁定在其他客戶身上', customerId: dup[0].id })
+
+  // phone 欄位空的就填 phone，已經有值就填 phone2；兩個都有值就不覆蓋，直接沿用原號碼建單
+  if (!c.phone) {
+    await db.query('UPDATE customers SET phone = ? WHERE id = ?', [normalized, customerId])
+  } else if (!c.phone2 && c.phone !== normalized) {
+    await db.query('UPDATE customers SET phone2 = ? WHERE id = ?', [normalized, customerId])
+  }
+
+  // 清掉陌生來電暫存（如果剛好是同一支號碼）
+  if (unknownCallerPhone === normalized) unknownCallerPhone = null
+
+  // 沿用 incomingCallById 的建草稿單邏輯
+  const [existingDrafts] = await db.query(
+    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
+    [customerId]
+  ) as any
+
+  if (existingDrafts[0]) {
+    return res.json({ ok: true, orderId: existingDrafts[0].id, reused: true, customerId: Number(customerId) })
+  }
+
+  const gasType = c.gas_type || 'BOTTLED_20KG'
+  const quantity = 1
+  const unitPrice = c.price_override || 800
+  const totalAmount = quantity * unitPrice
+
+  const [result] = await db.query(
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電綁定既有客戶草稿')`,
+    [customerId, quantity, unitPrice, totalAmount]
+  ) as any
+
+  const orderId = result.insertId
+
+  await db.query(
+    `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
+     VALUES (?, ?, ?, ?, ?)`,
+    [orderId, gasType, quantity, unitPrice, totalAmount]
+  )
+
+  return res.json({ ok: true, orderId, reused: false, customerId: Number(customerId) })
+}
+
 export async function incomingCallById(req: Request, res: Response) {
   const { customerId } = req.body
   if (!customerId) return res.status(400).json({ error: 'customerId required' })

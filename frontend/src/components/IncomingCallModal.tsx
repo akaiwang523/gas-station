@@ -36,6 +36,10 @@ export default function IncomingCallModal() {
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ id: number; name: string; address: string }[]>([])
+  const [searching, setSearching] = useState(false)
 
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
@@ -70,6 +74,9 @@ export default function IncomingCallModal() {
           setDraft(null)
           setNewName('')
           setNewAddress('')
+          setSearchMode(false)
+          setSearchQuery('')
+          setSearchResults([])
           setVisible(true)
         }
       } else {
@@ -130,6 +137,49 @@ export default function IncomingCallModal() {
     }
   }
 
+  // 搜尋既有客戶（debounce 400ms）
+  useEffect(() => {
+    if (!searchMode || !searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`/api/customers?search=${encodeURIComponent(searchQuery)}&limit=8`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        const data = await res.json()
+        setSearchResults((data.customers || []).map((c: any) => ({ id: c.id, name: c.name, address: c.address })))
+      } catch {
+        setSearchResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [searchQuery, searchMode, token])
+
+  async function handleBind(customerId: number) {
+    if (!unknownPhone) return
+    setLoading(true)
+    try {
+      await fetch('/api/caller/bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ customerId, phone: unknownPhone })
+      })
+      shownUnknownPhone.current = null
+      window.dispatchEvent(new Event('order-refresh'))
+    } finally {
+      setVisible(false)
+      setUnknownPhone(null)
+      setSearchMode(false)
+      setLoading(false)
+      poll()
+    }
+  }
+
   async function handleCreateAndOrder() {
     if (!unknownPhone) return
     setLoading(true)
@@ -170,6 +220,7 @@ export default function IncomingCallModal() {
     setVisible(false)
     setDraft(null)
     setUnknownPhone(null)
+    setSearchMode(false)
   }
 
   if (!visible) return null
@@ -186,36 +237,94 @@ export default function IncomingCallModal() {
             </div>
           </div>
 
-          <div className="px-5 py-4 space-y-3">
-            <div className="text-gray-500 text-sm">尚未建檔，要新增客戶並建單嗎？</div>
-            <div>
-              <label className="text-xs text-gray-500">姓名</label>
-              <input
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                placeholder={`來電 ${unknownPhone}`}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">地址</label>
-              <input
-                value={newAddress}
-                onChange={e => setNewAddress(e.target.value)}
-                placeholder="（待補）"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
-              />
-            </div>
-          </div>
+          {!searchMode ? (
+            <>
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-gray-500 text-sm">尚未建檔，要新增客戶並建單嗎？</div>
+                  <button
+                    onClick={() => setSearchMode(true)}
+                    className="text-orange-500 text-xs font-medium whitespace-nowrap ml-2"
+                  >
+                    🔍 是舊客戶？搜尋
+                  </button>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">姓名</label>
+                  <input
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder={`來電 ${unknownPhone}`}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">地址</label>
+                  <input
+                    value={newAddress}
+                    onChange={e => setNewAddress(e.target.value)}
+                    placeholder="（待補）"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-sm focus:outline-none focus:border-orange-400"
+                  />
+                </div>
+              </div>
 
-          <div className="px-5 pb-5 flex gap-3">
-            <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
-              略過
-            </button>
-            <button onClick={handleCreateAndOrder} disabled={loading} className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold">
-              ➕ 新增並建單
-            </button>
-          </div>
+              <div className="px-5 pb-5 flex gap-3">
+                <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  略過
+                </button>
+                <button onClick={handleCreateAndOrder} disabled={loading} className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold">
+                  ➕ 新增並建單
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-gray-500 text-sm">搜尋既有客戶（姓名/地址）</div>
+                  <button
+                    onClick={() => setSearchMode(false)}
+                    className="text-gray-400 text-xs font-medium whitespace-nowrap ml-2"
+                  >
+                    ← 返回新增
+                  </button>
+                </div>
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="輸入姓名或地址關鍵字"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400"
+                />
+                <div className="max-h-56 overflow-y-auto space-y-2">
+                  {searching && (
+                    <div className="text-center text-gray-400 text-sm py-3">搜尋中…</div>
+                  )}
+                  {!searching && searchQuery.trim() && searchResults.length === 0 && (
+                    <div className="text-center text-gray-400 text-sm py-3">找不到符合的客戶</div>
+                  )}
+                  {searchResults.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => handleBind(c.id)}
+                      disabled={loading}
+                      className="w-full text-left bg-gray-50 hover:bg-orange-50 rounded-xl px-3 py-2.5 transition"
+                    >
+                      <div className="font-medium text-gray-800 text-sm">{c.name}</div>
+                      <div className="text-gray-500 text-xs">{c.address}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-5 pb-5">
+                <button onClick={handleDismiss} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  略過
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     )
