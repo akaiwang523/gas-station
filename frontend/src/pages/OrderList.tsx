@@ -86,7 +86,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       } else if (filter !== 'ALL') {
         params.status = filter
       }
-      const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])grep -n "SCHEDULED" frontend/src/pages/OrderList.tsx
+      const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
       setSummary(sum)
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
       const map: Record<number, any[]> = {}
