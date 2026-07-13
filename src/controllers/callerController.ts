@@ -254,7 +254,7 @@ export async function getDraft(_req: Request, res: Response) {
 
 export async function confirmDraft(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const { paymentType, note, quantity, unitPrice, gasType } = req.body
+  const { paymentType, note, quantity, unitPrice, gasType, scheduledDate } = req.body
 
   const [rows] = await db.query(`SELECT * FROM orders WHERE id = ? AND status = 'DRAFT'`, [id]) as any
   if (!rows[0]) return res.status(404).json({ error: '草稿不存在' })
@@ -265,11 +265,14 @@ export async function confirmDraft(req: Request, res: Response) {
   const finalTotal = finalQty * finalPrice
   const finalGasType = gasType || 'BOTTLED_20KG'
 
-  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, id })
+  // scheduledDate 沒傳或傳空字串就代表「今天」，存 NULL；有傳日期字串（YYYY-MM-DD）就存指定日期
+  const finalScheduledDate = scheduledDate && scheduledDate.trim() ? scheduledDate : null
+
+  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, finalScheduledDate, id })
 
   await db.query(
-    `UPDATE orders SET status = 'PENDING', payment_type = ?, note = ?, quantity = ?, unit_price = ?, total_amount = ? WHERE id = ?`,
-    [paymentType || order.payment_type, note || order.note, finalQty, finalPrice, finalTotal, id]
+    `UPDATE orders SET status = 'PENDING', payment_type = ?, note = ?, quantity = ?, unit_price = ?, total_amount = ?, scheduled_date = ? WHERE id = ?`,
+    [paymentType || order.payment_type, note || order.note, finalQty, finalPrice, finalTotal, finalScheduledDate, id]
   )
 
   const [existingItems] = await db.query(

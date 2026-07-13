@@ -10,11 +10,11 @@ export async function listOrders(req: Request, res: Response) {
   if (customerId) { conditions.push('o.customer_id = ?'); params.push(customerId) }
   if (!customerId) {
     if (date) {
-      conditions.push('DATE(o.created_at) = ?')
+      conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = ?')
       params.push(date)
     } else if (!all && status !== 'DRAFT') {
-  conditions.push('DATE(o.created_at) = CURDATE()')
-}
+      conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = CURDATE()')
+    }
   }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''

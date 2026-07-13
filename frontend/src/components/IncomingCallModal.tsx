@@ -33,6 +33,7 @@ export default function IncomingCallModal() {
   const [editQty, setEditQty] = useState(1)
   const [editPrice, setEditPrice] = useState(800)
   const [editGasType, setEditGasType] = useState('BOTTLED_20KG')
+  const [scheduledDate, setScheduledDate] = useState('')
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -64,6 +65,7 @@ export default function IncomingCallModal() {
           setEditQty(data.draft.items?.[0]?.quantity || 1)
           setEditPrice(data.draft.items?.[0]?.unitPrice || 800)
           setEditGasType(data.draft.items?.[0]?.gasType || 'BOTTLED_20KG')
+          setScheduledDate('')
           setVisible(true)
         }
       } else if (data.unknownPhone) {
@@ -106,7 +108,7 @@ export default function IncomingCallModal() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice, gasType: editGasType })
+        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice, gasType: editGasType, scheduledDate })
       })
       setVisible(false)
       setDraft(null)
@@ -410,6 +412,28 @@ export default function IncomingCallModal() {
               <span>合計</span>
               <span>${editQty * editPrice}</span>
             </div>
+          </div>
+
+          <div>
+            <div className="text-gray-500 text-xs mb-2">配送日期</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setScheduledDate('')}
+                className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${!scheduledDate ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                📅 今天
+              </button>
+              <input
+                type="date"
+                value={scheduledDate}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={e => setScheduledDate(e.target.value)}
+                className={`flex-1 border rounded-xl px-3 py-2 text-sm ${scheduledDate ? 'border-orange-400 text-orange-600 font-medium' : 'border-gray-200 text-gray-500'}`}
+              />
+            </div>
+            {scheduledDate && (
+              <div className="text-orange-500 text-xs mt-1.5">⚠️ 此單將排定於 {scheduledDate}，在那天之前不會出現在待派送佇列</div>
+            )}
           </div>
 
           <div className="flex gap-2">
