@@ -2,14 +2,17 @@ import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
 export async function listOrders(req: Request, res: Response) {
-  const { status, date, customerId, limit = '10', all } = req.query
+  const { status, date, customerId, limit = '10', all, upcoming } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
   if (status) { conditions.push('o.status = ?'); params.push(status) }
   if (customerId) { conditions.push('o.customer_id = ?'); params.push(customerId) }
   if (!customerId) {
-    if (date) {
+    if (upcoming) {
+      // 已排定未來配送日的訂單（不含今天），讓首頁有地方能查到、編輯這些單
+      conditions.push(`o.scheduled_date IS NOT NULL AND o.scheduled_date > CURDATE()`)
+    } else if (date) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = ?')
       params.push(date)
     } else if (!all && status !== 'DRAFT') {

@@ -13,6 +13,7 @@ type Order = {
   status: string
   payment_type: string
   note: string | null
+  scheduled_date: string | null
   created_at: string
   items: any[]
 }
@@ -38,7 +39,6 @@ const GAS_LABELS: Record<string, string> = {
 function mapsUrl(address: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
 }
-// 把日期轉成「6/5（14 天前）」這種好讀格式
 function daysAgoLabel(dateStr: string) {
   const d = new Date(dateStr)
   const dateLabel = d.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
@@ -47,6 +47,13 @@ function daysAgoLabel(dateStr: string) {
   if (days <= 0) return `${dateLabel}（今天）`
   if (days === 1) return `${dateLabel}（昨天）`
   return `${dateLabel}（${days} 天前）`
+}
+// 判斷這筆訂單的配送日是不是還沒到（用來隱藏「開始配送」按鈕，避免提早出車）
+function isFutureScheduled(order: { scheduled_date: string | null }) {
+  if (!order.scheduled_date) return false
+  const sched = String(order.scheduled_date).slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  return sched > today
 }
 export default function OrderList({ refresh }: { refresh?: number }) {
   const [orders, setOrders] = useState<Order[]>([])
@@ -74,9 +81,12 @@ export default function OrderList({ refresh }: { refresh?: number }) {
     setLoading(true)
     try {
       const params: any = {}
-      if (filter !== 'ALL') params.status = filter
-      const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
-      setOrders(res.orders)
+      if (filter === 'SCHEDULED') {
+        params.upcoming = true
+      } else if (filter !== 'ALL') {
+        params.status = filter
+      }
+      const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])grep -n "SCHEDULED" frontend/src/pages/OrderList.tsx
       setSummary(sum)
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
       const map: Record<number, any[]> = {}
@@ -323,9 +333,9 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         </div>
       )}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {['ALL','PENDING','DELIVERING','DELIVERED'].map(s => (
+        {['ALL','PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => (
           <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {s === 'ALL' ? '全部' : STATUS_LABEL[s]}
+            {s === 'ALL' ? '全部' : s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
           </button>
         ))}
         <button onClick={load} className="flex-shrink-0 px-3 py-1.5 rounded-full text-sm bg-gray-100 text-gray-600">🔄</button>
@@ -345,6 +355,11 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                     <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
                   </div>
                   <div className="flex items-center gap-2.5">
+                    {order.scheduled_date && (
+                      <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-100 text-purple-700">
+                        📅 {new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
+                      </span>
+                    )}
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
                     <span className="text-gray-300 text-xs border-l border-gray-200 pl-2">{expandedId === order.id ? '收合 ▲' : '詳情 ▼'}</span>
                   </div>
@@ -464,16 +479,22 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                 </div>
               )}
               {/* 操作按鈕 */}
+              {/* 操作按鈕 */}
               <div className="flex gap-2 mt-3">
                 <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
                   className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
                   取消
                 </button>
-                {order.status === 'PENDING' && (
+                {order.status === 'PENDING' && !isFutureScheduled(order) && (
                   <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
                     className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
                     🚛 開始配送
                   </button>
+                )}
+                {order.status === 'PENDING' && isFutureScheduled(order) && (
+                  <div className="flex-1 bg-gray-50 text-gray-400 text-sm font-medium py-2 rounded-lg text-center">
+                    ⏳ 尚未到配送日
+                  </div>
                 )}
                 {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
                   <button onClick={e => { e.stopPropagation(); markDelivered(order) }} disabled={actionId === order.id}
