@@ -216,11 +216,30 @@ export default function IncomingCallModal() {
     }
   }
 
-  function handleDismiss() {
+  async function handleDismiss() {
+    if (unknownPhone) {
+      // 找到對應的 unknown_calls id 並標記已處理，避免下次輪詢又跳出來
+      try {
+        const res = await fetch('/api/caller/draft', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        const data = await res.json()
+        const match = data.unknownCalls?.find((u: any) => u.phone === unknownPhone)
+        if (match) {
+          await fetch(`/api/caller/unknown/${match.id}/dismiss`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        }
+      } catch {
+        // 靜默失敗，畫面還是會關閉，之後輪詢頂多再跳一次
+      }
+    }
     setVisible(false)
     setDraft(null)
     setUnknownPhone(null)
     setSearchMode(false)
+    shownUnknownPhone.current = null
   }
 
   if (!visible) return null
