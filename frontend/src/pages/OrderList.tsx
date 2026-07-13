@@ -87,6 +87,8 @@ export default function OrderList({ refresh }: { refresh?: number }) {
         params.status = filter
       }
       const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
+      console.log('DEBUG filter=', filter, 'orders count=', res.orders?.length, res.orders)
+      setOrders(res.orders)
       setSummary(sum)
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
       const map: Record<number, any[]> = {}
