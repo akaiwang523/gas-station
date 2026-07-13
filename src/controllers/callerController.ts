@@ -8,10 +8,6 @@ function normalizePhone(raw: string): string {
   return p
 }
 
-// 暫存陌生來電號碼（記憶體，重啟清空）
-let unknownCallerPhone: string | null = null
-let unknownCallerTime: number = 0
-
 export async function lookupCaller(req: Request, res: Response) {
   const { phone, apiKey } = req.body
   if (apiKey !== process.env.CALLER_API_KEY) return res.status(401).json({ error: 'Unauthorized' })
@@ -58,8 +54,11 @@ export async function createFromCall(req: Request, res: Response) {
   const customerId = result.insertId
   await db.query('INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed) VALUES (?, 0, 0)', [customerId])
 
-  // 清掉陌生來電暫存
-  unknownCallerPhone = null
+  // 這支號碼現在建檔了，把陌生來電紀錄標記已處理
+  await db.query(
+    `UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE phone = ? AND status = 'PENDING'`,
+    [normalized]
+  )
 
   return res.status(201).json({ created: true, customer: { id: customerId, name: name || `來電 ${normalized}`, phone: normalized } })
 }
@@ -80,14 +79,32 @@ export async function incomingCall(req: Request, res: Response) {
   ) as any
 
   if (!rows[0]) {
-    // 陌生號碼，暫存
-    unknownCallerPhone = normalized
-    unknownCallerTime = Date.now()
+    // 陌生號碼，寫進資料庫（同號碼重複來電只累加次數，不重複建列）
+    const [existingUnknown] = await db.query(
+      `SELECT id FROM unknown_calls WHERE phone = ? AND status = 'PENDING' LIMIT 1`,
+      [normalized]
+    ) as any
+
+    if (existingUnknown[0]) {
+      await db.query(
+        `UPDATE unknown_calls SET last_called_at = NOW(), call_count = call_count + 1 WHERE id = ?`,
+        [existingUnknown[0].id]
+      )
+    } else {
+      await db.query(
+        `INSERT INTO unknown_calls (phone, status) VALUES (?, 'PENDING')`,
+        [normalized]
+      )
+    }
+
     return res.json({ found: false, phone: normalized, draft: null })
   }
 
-  // 清掉陌生來電暫存
-  unknownCallerPhone = null
+  // 這支號碼現在找到客戶了，把之前的陌生來電紀錄標記已處理
+  await db.query(
+    `UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE phone = ? AND status = 'PENDING'`,
+    [normalized]
+  )
 
   const c = rows[0]
 
@@ -209,16 +226,30 @@ export async function getDraft(_req: Request, res: Response) {
       draft: drafts[0],   // 保留舊欄位相容：最早那筆（先到的客戶優先處理）
       drafts,             // 完整草稿佇列，前端可改用這個顯示所有待處理來電
       unknownPhone: null,
+      unknownCalls: [],
     })
   }
 
-  // 沒有草稿單，看有沒有陌生來電（5分鐘內有效）
-  const fiveMin = 5 * 60 * 1000
-  if (unknownCallerPhone && Date.now() - unknownCallerTime < fiveMin) {
-    return res.json({ draft: null, drafts: [], unknownPhone: unknownCallerPhone })
-  }
+  // 沒有草稿單，查資料庫裡還沒處理的陌生來電（不再有 5 分鐘限制，永久保留直到處理）
+  const [unknownRows] = await db.query(
+    `SELECT id, phone, first_called_at, last_called_at, call_count
+     FROM unknown_calls WHERE status = 'PENDING' ORDER BY first_called_at ASC`
+  ) as any
 
-  return res.json({ draft: null, drafts: [], unknownPhone: null })
+  const unknownCalls = unknownRows.map((u: any) => ({
+    id: u.id,
+    phone: u.phone,
+    firstCalledAt: u.first_called_at,
+    lastCalledAt: u.last_called_at,
+    callCount: u.call_count,
+  }))
+
+  return res.json({
+    draft: null,
+    drafts: [],
+    unknownPhone: unknownCalls[0]?.phone || null,  // 舊欄位相容：最早那筆
+    unknownCalls,                                    // 完整佇列，之後首頁可以用這個顯示常駐清單
+  })
 }
 
 export async function confirmDraft(req: Request, res: Response) {
@@ -278,6 +309,18 @@ export async function cancelDraft(req: Request, res: Response) {
   return res.json({ ok: true })
 }
 
+// POST /api/caller/unknown/:id/dismiss
+// 手動把某筆陌生來電標記為已處理（例如打錯電話、推銷電話，不想留在佇列裡）
+export async function dismissUnknownCall(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const [rows] = await db.query(`SELECT id FROM unknown_calls WHERE id = ? AND status = 'PENDING'`, [id]) as any
+  if (!rows[0]) return res.status(404).json({ error: '找不到這筆陌生來電' })
+
+  await db.query(`UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE id = ?`, [id])
+
+  return res.json({ ok: true })
+}
+
 // POST /api/caller/bind
 // body: { customerId, phone }
 // 把陌生來電號碼綁定到「既有客戶」（例如 Ragic 匯入、尚未登記電話的舊客戶），
@@ -312,8 +355,11 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
     await db.query('UPDATE customers SET phone2 = ? WHERE id = ?', [normalized, customerId])
   }
 
-  // 清掉陌生來電暫存（如果剛好是同一支號碼）
-  if (unknownCallerPhone === normalized) unknownCallerPhone = null
+  // 這支號碼綁定到既有客戶了，把陌生來電紀錄標記已處理
+  await db.query(
+    `UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE phone = ? AND status = 'PENDING'`,
+    [normalized]
+  )
 
   // 沿用 incomingCallById 的建草稿單邏輯
   const [existingDrafts] = await db.query(
@@ -393,4 +439,3 @@ export async function incomingCallById(req: Request, res: Response) {
 
   return res.json({ ok: true, orderId, reused: false })
 }
-
