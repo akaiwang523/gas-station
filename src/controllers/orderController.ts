@@ -12,9 +12,9 @@ export async function listOrders(req: Request, res: Response) {
     if (date) {
       conditions.push('DATE(o.created_at) = ?')
       params.push(date)
-    } else if (!all) {
-      conditions.push('DATE(o.created_at) = CURDATE()')
-    }
+    } else if (!all && status !== 'DRAFT') {
+  conditions.push('DATE(o.created_at) = CURDATE()')
+}
   }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
