@@ -34,6 +34,11 @@ export default function ReportPage() {
   const [selectedMonth, setSelectedMonth] = useState(getMonthOptions()[0].value)
   const [loading, setLoading] = useState(false)
   const monthOptions = getMonthOptions()
+  // 訂單查詢頁的編輯功能（品項/備註），邏輯與 OrderList.tsx 的編輯區一致
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null)
+  const [editItems, setEditItems] = useState<{ id: number; gasType: string; quantity: string; unitPrice: string }[]>([])
+  const [editNote, setEditNote] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
 
   // eslint-disable-next-line
   async function cancelSearchOrder(id: number) {
@@ -92,6 +97,54 @@ export default function ReportPage() {
       setSearchOrders(filtered)
     } finally {
       setSearchLoading(false)
+    }
+  }
+
+  // 展開/收合某筆訂單的編輯區
+  function toggleEditOrder(o: any) {
+    if (editingOrderId === o.id) { setEditingOrderId(null); return }
+    setEditingOrderId(o.id)
+    if (o.items && o.items.length > 0) {
+      setEditItems(o.items.map((i: any) => ({
+        id: i.id, gasType: i.gas_type, quantity: String(i.quantity), unitPrice: String(i.unit_price),
+      })))
+    } else {
+      setEditItems([{ id: 0, gasType: 'BOTTLED_20KG', quantity: String(o.quantity), unitPrice: String(o.unit_price) }])
+    }
+    setEditNote(o.note || '')
+  }
+  function updateEditItem(index: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
+    setEditItems(items => items.map((it, i) => i === index ? { ...it, [field]: value } : it))
+  }
+  function addEditItem() {
+    setEditItems(items => {
+      const lastPrice = items.length > 0 ? items[items.length - 1].unitPrice : ''
+      return [...items, { id: 0, gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: lastPrice }]
+    })
+  }
+  function removeEditItem(index: number) {
+    setEditItems(items => items.length <= 1 ? items : items.filter((_, i) => i !== index))
+  }
+  function editItemsTotal() {
+    return editItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0)
+  }
+  async function saveOrderEdit(o: any) {
+    if (editItems.length === 0) {
+      alert('至少需要一個品項')
+      return
+    }
+    setEditSaving(true)
+    try {
+      const items = editItems.map(i => ({
+        id: i.id || undefined, gasType: i.gasType, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
+      }))
+      await api.updateOrder(o.id, { items, note: editNote })
+      setEditingOrderId(null)
+      await searchOrderHistory()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -377,7 +430,65 @@ export default function ReportPage() {
                       ) : null}
                     </div>
                   )}
+                  {/* 編輯區：品項/單價/備註，儲存後即時反映到列表 */}
+                  {editingOrderId === o.id && (
+                    <div className="mt-2 pt-2 border-t border-gray-100 space-y-2" onClick={e => e.stopPropagation()}>
+                      {editItems.map((item, idx) => (
+                        <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                          <select
+                            className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.gasType}
+                            onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                          >
+                            {Object.entries(GAS_LABELS).map(([val, label]) => (
+                              <option key={val} value={val}>{label}</option>
+                            ))}
+                          </select>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                            <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                              value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                            <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                              value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                          </div>
+                          <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
+                            ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                          </div>
+                          <button
+                            onClick={() => removeEditItem(idx)}
+                            disabled={editItems.length <= 1}
+                            className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
+                            title="刪除此品項"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={addEditItem}
+                        className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
+                      >
+                        ＋ 新增品項（不同規格）
+                      </button>
+                      <div className="text-xs text-gray-500">合計：${editItemsTotal().toLocaleString()}</div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">備註</label>
+                        <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          value={editNote} onChange={e => setEditNote(e.target.value)} />
+                      </div>
+                      <button onClick={() => saveOrderEdit(o)} disabled={editSaving}
+                        className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
+                        {editSaving ? '儲存中...' : '💾 儲存修改'}
+                      </button>
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
+                    <button onClick={() => toggleEditOrder(o)} className="px-3 bg-gray-100 hover:bg-orange-100 text-gray-500 hover:text-orange-600 text-xs font-medium py-1.5 rounded-lg transition">
+                      {editingOrderId === o.id ? '收合' : '✏️ 編輯'}
+                    </button>
                     {o.status === 'PENDING' && (
                       <button onClick={async () => { await api.updateOrderStatus(o.id, 'DELIVERING'); searchOrderHistory() }} className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium py-1.5 rounded-lg transition">🚛 出發</button>
                     )}
