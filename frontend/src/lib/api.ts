@@ -48,6 +48,10 @@ export const api = {
     request('/customers', { method: 'POST', body: JSON.stringify(data) }),
   updateCustomer: (id: number, data: any) =>
     request(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  mergePreview: (idA: number, idB: number) =>
+    request(`/customers/merge-preview?idA=${idA}&idB=${idB}`),
+  mergeCustomers: (keepId: number, mergeId: number) =>
+    request('/customers/merge', { method: 'POST', body: JSON.stringify({ keepId, mergeId }) }),
 
   // Orders
   getOrders: (params?: { status?: string; date?: string; driverId?: number; customerId?: number; limit?: number; all?: boolean; upcoming?: boolean }) => {

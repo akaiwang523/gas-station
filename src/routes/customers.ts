@@ -1,10 +1,12 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/auth'
-import { listCustomers, getCustomer, createCustomer, updateCustomer, deleteCustomer, deactivateCustomer, hardDeleteCustomer } from '../controllers/customerController'
+import { listCustomers, getCustomer, createCustomer, updateCustomer, deleteCustomer, deactivateCustomer, hardDeleteCustomer, mergePreview, mergeCustomers } from '../controllers/customerController'
 
 export const customerRoutes = Router()
 customerRoutes.use(authenticate)
 customerRoutes.get('/', listCustomers)
+customerRoutes.get('/merge-preview', mergePreview)
+customerRoutes.post('/merge', mergeCustomers)
 customerRoutes.get('/:id', getCustomer)
 customerRoutes.post('/', createCustomer)
 customerRoutes.put('/:id', updateCustomer)

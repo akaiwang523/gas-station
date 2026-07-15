@@ -53,6 +53,13 @@ export default function CustomerPage() {
   const [deliveryDays, setDeliveryDays] = useState<number[]>([])
   const [showFixedDelivery, setShowFixedDelivery] = useState(false)
   const [saving, setSaving] = useState(false)
+  // 合併客戶功能：選兩筆客戶 -> 預覽兩邊資料 -> 選要保留哪一筆 -> 確認合併
+  const [mergeMode, setMergeMode] = useState(false)
+  const [selectedForMerge, setSelectedForMerge] = useState<number[]>([])
+  const [mergePreviewData, setMergePreviewData] = useState<{ customerA: any; customerB: any } | null>(null)
+  const [mergeKeepId, setMergeKeepId] = useState<number | null>(null)
+  const [mergePreviewLoading, setMergePreviewLoading] = useState(false)
+  const [mergeLoading, setMergeLoading] = useState(false)
 
   function toggleDeliveryDay(day: number) {
     setDeliveryDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
@@ -139,12 +146,78 @@ export default function CustomerPage() {
     }
   }
 
+  function toggleMergeMode() {
+    setMergeMode(m => !m)
+    setSelectedForMerge([])
+  }
+  function toggleSelectForMerge(id: number) {
+    setSelectedForMerge(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id)
+      if (prev.length >= 2) return [prev[1], id] // 一次只比較最近選的兩筆
+      return [...prev, id]
+    })
+  }
+  async function openMergePreview() {
+    if (selectedForMerge.length !== 2) return
+    setMergePreviewLoading(true)
+    try {
+      const res = await api.mergePreview(selectedForMerge[0], selectedForMerge[1])
+      setMergePreviewData(res)
+      // 預設保留訂單數較多的那筆（比較可能是「主要」那筆客戶資料）
+      setMergeKeepId(res.customerA.orderCount >= res.customerB.orderCount ? res.customerA.id : res.customerB.id)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setMergePreviewLoading(false)
+    }
+  }
+  function closeMergePreview() {
+    setMergePreviewData(null)
+    setMergeKeepId(null)
+  }
+  async function confirmMerge() {
+    if (!mergePreviewData || !mergeKeepId) return
+    const other = mergePreviewData.customerA.id === mergeKeepId ? mergePreviewData.customerB.id : mergePreviewData.customerA.id
+    setMergeLoading(true)
+    try {
+      await api.mergeCustomers(mergeKeepId, other)
+      closeMergePreview()
+      setMergeMode(false)
+      setSelectedForMerge([])
+      await load()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setMergeLoading(false)
+    }
+  }
+
   return (
     <div className="max-w-lg mx-auto p-4 space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-gray-800">👥 客戶管理</h2>
-        <button onClick={openAdd} className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-medium">+ 新增</button>
+        <div className="flex gap-2">
+          <button onClick={toggleMergeMode} className={`px-3 py-2 rounded-xl text-sm font-medium transition ${mergeMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            🔗 {mergeMode ? '取消合併' : '合併客戶'}
+          </button>
+          <button onClick={openAdd} className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-medium">+ 新增</button>
+        </div>
       </div>
+
+      {mergeMode && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-2">
+          <div className="text-sm text-orange-700">
+            已選 {selectedForMerge.length}/2 筆{selectedForMerge.length < 2 ? '，點選要合併的兩筆客戶卡片' : '，可以預覽合併了'}
+          </div>
+          <button
+            onClick={openMergePreview}
+            disabled={selectedForMerge.length !== 2 || mergePreviewLoading}
+            className="flex-shrink-0 bg-orange-500 disabled:bg-gray-300 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          >
+            {mergePreviewLoading ? '載入中...' : '預覽合併 →'}
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-2">
         <input
@@ -160,7 +233,11 @@ export default function CustomerPage() {
       {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
 
       {!loading && customers.map(c => (
-        <div key={c.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div
+          key={c.id}
+          onClick={() => mergeMode && toggleSelectForMerge(c.id)}
+          className={`bg-white border rounded-xl p-4 shadow-sm transition ${mergeMode ? 'cursor-pointer' : ''} ${mergeMode && selectedForMerge.includes(c.id) ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-200'}`}
+        >
           <div className="flex justify-between items-start">
             <div className="flex-1">
               <div className="font-bold text-gray-800">{c.name}
@@ -185,15 +262,21 @@ export default function CustomerPage() {
               )}
               {c.note && <div className="text-xs text-orange-600 mt-1">📝 {c.note}</div>}
             </div>
-            <div className="flex flex-col gap-1 ml-2 items-end">
-                <button onClick={() => openEdit(c)} className="text-orange-500 text-sm">編輯</button>
-                {c.status === 'ACTIVE' ? (
-                  <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定停用此客戶？')) { await api.deactivateCustomer(c.id); load() } }} className="text-yellow-500 hover:text-yellow-700 text-xs">停用</button>
-                ) : (
-                  <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定啟用此客戶？')) { await api.updateCustomer(c.id, { status: 'ACTIVE' }); load() } }} className="text-green-500 hover:text-green-700 text-xs">啟用</button>
-                )}
-                <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定刪除此客戶？有訂單記錄的客戶無法刪除。')) { try { await api.hardDeleteCustomer(c.id); load() } catch(err: any) { alert(err.message) } } }} className="text-red-400 hover:text-red-600 text-xs">刪除</button>
+            {mergeMode ? (
+              <div className={`ml-2 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold transition ${selectedForMerge.includes(c.id) ? 'bg-orange-500 border-orange-500 text-white' : 'border-gray-300 text-transparent'}`}>
+                ✓
               </div>
+            ) : (
+              <div className="flex flex-col gap-1 ml-2 items-end">
+                  <button onClick={() => openEdit(c)} className="text-orange-500 text-sm">編輯</button>
+                  {c.status === 'ACTIVE' ? (
+                    <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定停用此客戶？')) { await api.deactivateCustomer(c.id); load() } }} className="text-yellow-500 hover:text-yellow-700 text-xs">停用</button>
+                  ) : (
+                    <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定啟用此客戶？')) { await api.updateCustomer(c.id, { status: 'ACTIVE' }); load() } }} className="text-green-500 hover:text-green-700 text-xs">啟用</button>
+                  )}
+                  <button onClick={async (e) => { e.stopPropagation(); if(window.confirm('確定刪除此客戶？有訂單記錄的客戶無法刪除。')) { try { await api.hardDeleteCustomer(c.id); load() } catch(err: any) { alert(err.message) } } }} className="text-red-400 hover:text-red-600 text-xs">刪除</button>
+                </div>
+            )}
           </div>
         </div>
       ))}
@@ -325,6 +408,57 @@ export default function CustomerPage() {
               className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl text-base transition mt-2"
             >
               {saving ? '儲存中...' : '✅ 儲存'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 合併客戶：預覽並選擇要保留哪一筆 */}
+      {mergePreviewData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeMergePreview}>
+          <div className="bg-white w-full max-w-md rounded-2xl p-5 space-y-3 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold">確認合併客戶</h3>
+              <button onClick={closeMergePreview} className="text-gray-400 text-2xl">×</button>
+            </div>
+            <p className="text-sm text-gray-500">
+              選擇要保留的那一筆。另一筆的訂單、欠款、退桶記錄會全部併入保留的客戶，並標記停用（不會刪除，之後仍可查證）。
+            </p>
+
+            {[mergePreviewData.customerA, mergePreviewData.customerB].map((c: any) => (
+              <button
+                key={c.id}
+                onClick={() => setMergeKeepId(c.id)}
+                className={`w-full text-left border-2 rounded-xl p-3 space-y-1 transition ${mergeKeepId === c.id ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="font-bold text-gray-800">{c.name}</div>
+                  {mergeKeepId === c.id && <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full flex-shrink-0">保留這筆</span>}
+                </div>
+                <div className="text-sm text-gray-600">{c.phone}{c.phone2 ? ` / ${c.phone2}` : ''}</div>
+                <div className="text-sm text-gray-500">{c.address}</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400 pt-1">
+                  <span>{c.orderCount} 筆訂單</span>
+                  <span>{c.returnCount} 筆退桶</span>
+                  {Number(c.amount_owed) > 0 && <span className="text-red-400">欠款 ${Number(c.amount_owed).toLocaleString()}</span>}
+                  {Number(c.cylinders_owed) > 0 && <span className="text-red-400">欠桶 {c.cylinders_owed}</span>}
+                  {c.lineBound && <span className="text-green-500">已綁 LINE</span>}
+                </div>
+                {c.recentOrders?.length > 0 && (
+                  <div className="text-xs text-gray-400 pt-1 border-t border-gray-100 mt-1">
+                    最近訂單：{c.recentOrders.map((o: any) => new Date(o.created_at).toLocaleDateString('zh-TW')).join('、')}
+                  </div>
+                )}
+                {c.note && <div className="text-xs text-orange-600">📝 {c.note}</div>}
+              </button>
+            ))}
+
+            <button
+              onClick={confirmMerge}
+              disabled={mergeLoading || !mergeKeepId}
+              className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-xl text-base transition"
+            >
+              {mergeLoading ? '合併中...' : '✅ 確認合併'}
             </button>
           </div>
         </div>
