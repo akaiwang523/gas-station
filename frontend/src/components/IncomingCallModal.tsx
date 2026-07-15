@@ -76,7 +76,9 @@ export default function IncomingCallModal() {
           setDraft(null)
           setNewName('')
           setNewAddress('')
-          setSearchMode(false)
+          // 多數陌生來電其實是「還沒登記市話的舊客戶」，所以預設先進搜尋模式，
+          // 真的要新增客戶要手動切換過去，避免手滑重複建檔
+          setSearchMode(true)
           setSearchQuery('')
           setSearchResults([])
           setVisible(true)
@@ -303,12 +305,12 @@ export default function IncomingCallModal() {
             <>
               <div className="px-5 py-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="text-gray-500 text-sm">搜尋既有客戶（姓名/地址）</div>
+                  <div className="text-gray-500 text-sm">先搜尋看看是不是舊客戶</div>
                   <button
                     onClick={() => setSearchMode(false)}
-                    className="text-gray-400 text-xs font-medium whitespace-nowrap ml-2"
+                    className="text-orange-500 text-xs font-medium whitespace-nowrap ml-2"
                   >
-                    ← 返回新增
+                    ➕ 真的是新客戶？
                   </button>
                 </div>
                 <input
@@ -323,7 +325,15 @@ export default function IncomingCallModal() {
                     <div className="text-center text-gray-400 text-sm py-3">搜尋中…</div>
                   )}
                   {!searching && searchQuery.trim() && searchResults.length === 0 && (
-                    <div className="text-center text-gray-400 text-sm py-3">找不到符合的客戶</div>
+                    <div className="text-center text-gray-400 text-sm py-3 space-y-2">
+                      <div>找不到符合的客戶</div>
+                      <button
+                        onClick={() => setSearchMode(false)}
+                        className="text-orange-500 text-xs font-medium underline"
+                      >
+                        建立新客戶
+                      </button>
+                    </div>
                   )}
                   {searchResults.map(c => (
                     <button
