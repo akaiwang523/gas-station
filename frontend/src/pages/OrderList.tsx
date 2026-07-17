@@ -68,6 +68,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [predictions, setPredictions] = useState<any[]>([])
   const [predExpanded, setPredExpanded] = useState(false)
   const [drafts, setDrafts] = useState<Order[]>([])
+  const [draftEditId, setDraftEditId] = useState<number | null>(null)
+  const [draftGasType, setDraftGasType] = useState('BOTTLED_20KG')
+  const [draftQty, setDraftQty] = useState('1')
+  const [draftPrice, setDraftPrice] = useState('800')
+  const [draftPaymentType, setDraftPaymentType] = useState('CASH')
+  const [draftScheduledDate, setDraftScheduledDate] = useState('')
+  const [draftConfirmLoading, setDraftConfirmLoading] = useState(false)
   const [returnAmount, setReturnAmount] = useState('')
   const [returnNote, setReturnNote] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
@@ -249,6 +256,39 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     try { await api.deleteOrder(id); await load() }
     finally { setActionId(null) }
   }
+  // 展開來電草稿的核對表單（品項/付款方式/預約日期），取代舊版直接呼叫 updateOrderStatus
+  // 跳過所有核對的快速確認鈕——那條路徑不會寫 scheduled_date，付款方式也永遠停在建草稿時的預設 CASH
+  function openDraftConfirm(d: Order) {
+    setDraftEditId(d.id)
+    const firstItem = d.items?.[0]
+    setDraftGasType(firstItem?.gas_type || 'BOTTLED_20KG')
+    setDraftQty(String(firstItem?.quantity ?? d.quantity ?? 1))
+    setDraftPrice(String(firstItem?.unit_price ?? d.unit_price ?? 800))
+    setDraftPaymentType(d.payment_type || 'CASH')
+    setDraftScheduledDate('')
+  }
+  function closeDraftConfirm() {
+    setDraftEditId(null)
+  }
+  async function submitDraftConfirm(id: number) {
+    setDraftConfirmLoading(true)
+    try {
+      await api.confirmDraft(id, {
+        paymentType: draftPaymentType,
+        quantity: Number(draftQty),
+        unitPrice: Number(draftPrice),
+        gasType: draftGasType,
+        scheduledDate: draftScheduledDate,
+      })
+      setDraftEditId(null)
+      setDrafts(prev => prev.filter(x => x.id !== id))
+      await load()
+    } catch {
+      alert('確認失敗')
+    } finally {
+      setDraftConfirmLoading(false)
+    }
+  }
   const pending = orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
   return (
@@ -275,35 +315,95 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           <div className="text-sm font-bold text-orange-800 mb-2">📞 來電草稿（待確認）<span className="ml-2 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{drafts.length}</span></div>
           <div className="space-y-2">
             {drafts.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map(d => (
-              <div key={d.id} className="bg-white rounded-xl p-3 border border-orange-100 flex items-center justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-gray-800 text-sm truncate">{d.customer_name}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {d.items?.length > 0 ? d.items.map((i:any) => `${i.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${i.quantity}`).join(' + ') : `${d.quantity} 桶`}
-                    　{new Date(d.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'})} 來電
+              <div key={d.id} className="bg-white rounded-xl p-3 border border-orange-100">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-gray-800 text-sm truncate">{d.customer_name}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {d.items?.length > 0 ? d.items.map((i:any) => `${i.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${i.quantity}`).join(' + ') : `${d.quantity} 桶`}
+                      　{new Date(d.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'})} 來電
+                    </div>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    {draftEditId === d.id ? (
+                      <button
+                        className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg"
+                        onClick={closeDraftConfirm}
+                      >收合</button>
+                    ) : (
+                      <button
+                        className="px-3 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg"
+                        onClick={() => openDraftConfirm(d)}
+                      >✅ 核對確認</button>
+                    )}
+                    <button
+                      className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg"
+                      onClick={async () => {
+                        if (!window.confirm('確定要刪除這筆來電草稿嗎？')) return
+                        try {
+                          await api.cancelDraft(d.id)
+                          setDrafts(prev => prev.filter(x => x.id !== d.id))
+                        } catch { alert('刪除失敗') }
+                      }}
+                    >🗑</button>
                   </div>
                 </div>
-                <div className="flex gap-1 flex-shrink-0">
-                  <button
-                    className="px-3 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-lg"
-                    onClick={async () => {
-                      try {
-                        await api.updateOrderStatus(d.id, 'PENDING')
-                        setDrafts(prev => prev.filter(x => x.id !== d.id))
-                        await load()
-                      } catch { alert('操作失敗') }
-                    }}
-                  >✅ 確認</button>
-                  <button
-                    className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg"
-                    onClick={async () => {
-                      try {
-                        await api.deleteOrder(d.id)
-                        setDrafts(prev => prev.filter(x => x.id !== d.id))
-                      } catch { alert('刪除失敗') }
-                    }}
-                  >🗑</button>
-                </div>
+                {draftEditId === d.id && (
+                  <div className="mt-3 pt-3 border-t border-orange-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        value={draftGasType}
+                        onChange={e => setDraftGasType(e.target.value)}
+                      >
+                        {Object.entries(GAS_LABELS).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                        <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          value={draftQty} onChange={e => setDraftQty(e.target.value)} />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                        <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          value={draftPrice} onChange={e => setDraftPrice(e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">付款方式</label>
+                      <div className="flex gap-2">
+                        {[['CASH', '💵 現金'], ['AR', '📒 欠帳']].map(([val, label]) => (
+                          <button
+                            key={val}
+                            onClick={() => setDraftPaymentType(val)}
+                            className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${draftPaymentType === val ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                          >{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">預約配送日（留空＝今天）</label>
+                      <input
+                        type="date"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        value={draftScheduledDate}
+                        onChange={e => setDraftScheduledDate(e.target.value)}
+                      />
+                      {draftScheduledDate && (
+                        <div className="text-orange-500 text-xs mt-1">⚠️ 此單將排定於 {draftScheduledDate}，在那天之前不會出現在待派送佇列</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => submitDraftConfirm(d.id)}
+                      disabled={draftConfirmLoading}
+                      className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition"
+                    >
+                      {draftConfirmLoading ? '確認中...' : '💾 確認送出'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

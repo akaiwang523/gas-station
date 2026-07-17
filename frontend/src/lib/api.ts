@@ -97,6 +97,10 @@ export const api = {
     request(`/orders/${id}/cancel`, { method: 'PATCH' }),
   deleteOrder: (id: number) =>
     request(`/orders/${id}`, { method: 'DELETE' }),
+  confirmDraft: (id: number, data: { paymentType?: string; quantity?: number; unitPrice?: number; gasType?: string; scheduledDate?: string; note?: string }) =>
+    request(`/caller/draft/${id}/confirm`, { method: 'POST', body: JSON.stringify(data) }),
+  cancelDraft: (id: number) =>
+    request(`/caller/draft/${id}`, { method: 'DELETE' }),
   deactivateCustomer: (id: number) =>
     request(`/customers/${id}/deactivate`, { method: 'PATCH' }),
   hardDeleteCustomer: (id: number) =>
