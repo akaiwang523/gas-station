@@ -14,6 +14,7 @@ export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'))
   const [page, setPage] = useState<Page>('orders')
   const [orderRefresh, setOrderRefresh] = useState(0)
+  const [customerEditId, setCustomerEditId] = useState<number | null>(null)
 
   useEffect(() => {
     const handler = () => setOrderRefresh(r => r + 1)
@@ -28,6 +29,11 @@ export default function App() {
   function handleOrderCreated() {
     setOrderRefresh(r => r + 1)
     setPage('orders')
+  }
+
+  function handleEditCustomer(customerId: number) {
+    setCustomerEditId(customerId)
+    setPage('customers')
   }
 
   const navItems: { key: Page; label: string; icon: string }[] = [
@@ -55,10 +61,10 @@ export default function App() {
 
       {/* Content */}
       <div className="pt-2">
-        {page === 'orders' && <OrderList refresh={orderRefresh} />}
+        {page === 'orders' && <OrderList refresh={orderRefresh} onEditCustomer={handleEditCustomer} />}
         {page === 'new' && <NewOrder onOrderCreated={handleOrderCreated} />}
         {page === 'ar' && <ArPage />}
-        {page === 'customers' && <CustomerPage />}
+        {page === 'customers' && <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />}
         {page === 'report' && <ReportPage />}
       </div>
 

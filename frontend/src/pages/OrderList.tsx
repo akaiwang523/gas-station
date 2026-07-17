@@ -55,7 +55,7 @@ function isFutureScheduled(order: { scheduled_date: string | null }) {
   const today = new Date().toISOString().slice(0, 10)
   return sched > today
 }
-export default function OrderList({ refresh }: { refresh?: number }) {
+export default function OrderList({ refresh, onEditCustomer }: { refresh?: number; onEditCustomer?: (customerId: number) => void }) {
   const [orders, setOrders] = useState<Order[]>([])
   const [returnsMap, setReturnsMap] = useState<Record<number, any[]>>({})
   const [summary, setSummary] = useState<any>(null)
@@ -75,6 +75,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [editItems, setEditItems] = useState<{ id: number; gasType: string; quantity: string; unitPrice: string }[]>([])
   const [editNote, setEditNote] = useState('')
+  const [editPaymentType, setEditPaymentType] = useState('CASH')
   const [editLoading, setEditLoading] = useState(false)
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
   async function load() {
@@ -144,6 +145,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       setEditItems([{ id: 0, gasType: 'BOTTLED_20KG', quantity: String(order.quantity), unitPrice: String(order.unit_price) }])
     }
     setEditNote(order.note || '')
+    setEditPaymentType(order.payment_type)
     // 若 load() 階段還沒撈到（例如已完成訂單），補撈一次
     if (!customerHistory[order.customer_id]) {
       try {
@@ -163,7 +165,7 @@ export default function OrderList({ refresh }: { refresh?: number }) {
       const items = editItems.map(i => ({
         id: i.id || undefined, gasType: i.gasType, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
       }))
-      await api.updateOrder(order.id, { items, note: editNote })
+      await api.updateOrder(order.id, { items, note: editNote, paymentType: editPaymentType })
       setExpandedId(null)
       await load()
     } catch (e: any) {
@@ -355,6 +357,13 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                   <div>
                     <span className="font-bold text-gray-800">{order.customer_name}</span>
                     <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
+                    {onEditCustomer && (
+                      <button
+                        onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                        className="text-xs text-blue-500 ml-2 align-middle"
+                        title="編輯客戶資料"
+                      >✏️ 客戶</button>
+                    )}
                   </div>
                   <div className="flex items-center gap-2.5">
                     {order.scheduled_date && (
@@ -473,6 +482,20 @@ export default function OrderList({ refresh }: { refresh?: number }) {
                     <label className="block text-xs text-gray-500 mb-1">備註</label>
                     <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                       value={editNote} onChange={e => setEditNote(e.target.value)} onClick={e => e.stopPropagation()} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">付款方式</label>
+                    <div className="flex gap-2">
+                      {[['CASH', '💵 現金'], ['AR', '📒 欠帳']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          onClick={e => { e.stopPropagation(); setEditPaymentType(val) }}
+                          className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editPaymentType === val ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <button onClick={e => { e.stopPropagation(); saveEdit(order) }} disabled={editLoading}
                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">

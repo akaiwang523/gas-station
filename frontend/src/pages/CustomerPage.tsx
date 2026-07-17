@@ -39,7 +39,7 @@ const DELIVERY_CYCLE_LABEL: Record<string, string> = {
   FLOW_METER: '流量計',
 }
 
-export default function CustomerPage() {
+export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openEditId?: number | null; onOpenEditConsumed?: () => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -76,6 +76,21 @@ export default function CustomerPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  // 從訂單頁點「編輯客戶」跳轉過來時，直接抓該客戶資料並打開編輯視窗
+  useEffect(() => {
+    if (!openEditId) return
+    (async () => {
+      try {
+        const c = await api.getCustomer(openEditId)
+        openEdit(c)
+      } catch {
+        alert('找不到這筆客戶資料')
+      } finally {
+        onOpenEditConsumed?.()
+      }
+    })()
+  }, [openEditId])
 
   function openAdd() {
     setForm({

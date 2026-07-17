@@ -263,7 +263,7 @@ export async function deleteOrder(req: Request, res: Response) {
 
 export async function updateOrder(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const { items, note } = req.body
+  const { items, note, paymentType } = req.body
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '缺少品項資料' })
@@ -276,15 +276,23 @@ export async function updateOrder(req: Request, res: Response) {
       return res.status(400).json({ error: '每個品項的桶數需大於 0' })
     }
   }
+  if (paymentType !== undefined && paymentType !== 'CASH' && paymentType !== 'AR') {
+    return res.status(400).json({ error: '付款方式錯誤' })
+  }
 
   const conn = await db.getConnection()
   try {
     await conn.beginTransaction()
 
     const [rows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]) as any
-    if (!rows[0]) {
+    const oldOrder = rows[0]
+    if (!oldOrder) {
       await conn.rollback()
       return res.status(404).json({ error: '訂單不存在' })
+    }
+    if (oldOrder.status === 'DELIVERED' || oldOrder.status === 'CANCELLED') {
+      await conn.rollback()
+      return res.status(400).json({ error: '已完成或已取消的訂單無法修改' })
     }
 
     // 找出目前資料庫裡實際存在的品項 id，用來判斷哪些被使用者刪除了
@@ -325,11 +333,33 @@ export async function updateOrder(req: Request, res: Response) {
     const totalQuantity = items.reduce((s: number, i: any) => s + Number(i.quantity), 0)
     const totalAmount = items.reduce((s: number, i: any) => s + Number(i.quantity) * Number(i.unitPrice), 0)
     const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
+    const newPaymentType = paymentType !== undefined ? paymentType : oldOrder.payment_type
 
     await conn.query(
-      `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ? WHERE id = ?`,
-      [totalQuantity, avgUnitPrice, totalAmount, note ?? null, id]
+      `UPDATE orders SET quantity = ?, unit_price = ?, total_amount = ?, note = ?, payment_type = ? WHERE id = ?`,
+      [totalQuantity, avgUnitPrice, totalAmount, note ?? null, newPaymentType, id]
     )
+
+    // 欠帳金額校正：先扣掉這筆訂單原本掛在 ar_balances 上的舊金額/舊桶數，
+    // 再依新的付款方式決定要不要重新加回去（涵蓋現金⇄欠帳切換，也順便修正
+    // 「欠帳單改品項/金額但 ar_balances 沒跟著變」這個既有問題）
+    if (oldOrder.payment_type === 'AR') {
+      await conn.query(
+        `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
+        [oldOrder.total_amount, oldOrder.quantity, oldOrder.customer_id]
+      )
+    }
+    if (newPaymentType === 'AR') {
+      await conn.query(
+        `INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           amount_owed = amount_owed + VALUES(amount_owed),
+           cylinders_owed = cylinders_owed + VALUES(cylinders_owed),
+           updated_at = NOW()`,
+        [oldOrder.customer_id, totalAmount, totalQuantity]
+      )
+    }
 
     await conn.commit()
     res.json({ ok: true })
