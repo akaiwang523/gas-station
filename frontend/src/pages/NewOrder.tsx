@@ -85,9 +85,9 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       setPendingReturns(pr.returns || [])
     } catch { setPendingReturns([]) }
 
-    // 帶出上一單
+    // 帶出上一單（只認真的送達過的單，避免把取消/還沒處理完的單當成參考）
     try {
-      const res = await api.getOrders({ customerId: c.id, limit: 1 })
+      const res = await api.getOrders({ customerId: c.id, status: 'DELIVERED', limit: 1 })
       const last = res.orders?.[0]
       if (last && last.items && last.items.length > 0) {
         setItems(last.items.map((i: any) => ({
