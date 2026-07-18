@@ -14,6 +14,7 @@ type Order = {
   payment_type: string
   note: string | null
   scheduled_date: string | null
+  call_time: string | null
   created_at: string
   items: any[]
 }
@@ -322,7 +323,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     <div className="font-bold text-gray-800 text-sm truncate">{d.customer_name}</div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {d.items?.length > 0 ? d.items.map((i:any) => `${i.gas_type?.replace('BOTTLED_','').replace('KG','kg')} × ${i.quantity}`).join(' + ') : `${d.quantity} 桶`}
-                      　{new Date(d.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'})} 來電
+                      　{new Date(d.call_time || d.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit', timeZone: 'Asia/Taipei'})} 來電
                     </div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
@@ -476,6 +477,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     <span className="text-gray-300 text-xs border-l border-gray-200 pl-2">{expandedId === order.id ? '收合 ▲' : '詳情 ▼'}</span>
                   </div>
                 </div>
+                {order.call_time && (
+                  <div className="text-xs text-gray-400 mb-1.5">📞 來電 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>
+                )}
                 {lastDelivery && (
                   <div className="text-xs text-gray-400 mb-1.5">🕓 上次配送 {daysAgoLabel(lastDelivery.created_at)}</div>
                 )}
