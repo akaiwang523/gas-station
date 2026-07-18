@@ -121,7 +121,7 @@ export async function incomingCall(req: Request, res: Response) {
     // 標記為「再次來電」，更新時間，內容維持原樣讓司機自己確認
     await db.query(
       `UPDATE orders SET note = CONCAT(COALESCE(note, ''), '（再次來電 ', ?, '）'), updated_at = NOW() WHERE id = ?`,
-      [new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }), draftId]
+      [new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }), draftId]
     )
   } else {
     const [lastOrders] = await db.query(
