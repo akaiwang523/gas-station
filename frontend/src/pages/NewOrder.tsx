@@ -55,6 +55,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [stairFee, setStairFee] = useState(0)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [scheduledDate, setScheduledDate] = useState('')
+  const [callTime, setCallTime] = useState('')
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState('')
@@ -178,7 +179,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       }
 
       const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
-      await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote, scheduledDate })
+      await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote, scheduledDate, callTime })
 
       const name = isNew ? newName : selected!.name
       const totalQty = items.reduce((s, i) => s + i.quantity, 0)
@@ -342,6 +343,20 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         />
         {scheduledDate && (
           <div className="text-orange-500 text-xs mt-1.5">⚠️ 此單將排定於 {scheduledDate}，在那天之前不會出現在待派送佇列</div>
+        )}
+      </div>
+
+      {/* 來電時間（留空＝現在，補紙本單/事後轉述時可以手動調整成實際來電時間） */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">來電時間（選填，留空＝現在）</label>
+        <input
+          type="datetime-local"
+          className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+          value={callTime}
+          onChange={e => setCallTime(e.target.value)}
+        />
+        {callTime && (
+          <div className="text-gray-400 text-xs mt-1.5">補紙本單或事後轉述時，可以調整成客人實際來電的時間</div>
         )}
       </div>
 

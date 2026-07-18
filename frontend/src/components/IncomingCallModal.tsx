@@ -206,7 +206,7 @@ export default function IncomingCallModal() {
         await fetch('/api/caller/incoming-by-id', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ customerId: data.customer.id })
+          body: JSON.stringify({ customerId: data.customer.id, phone: unknownPhone })
         })
       }
       shownUnknownPhone.current = null

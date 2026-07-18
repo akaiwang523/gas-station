@@ -56,7 +56,7 @@ export async function listOrders(req: Request, res: Response) {
 }
 
 export async function createOrder(req: Request, res: Response) {
-  const { customerId, items, stairFee = 0, note, paymentType = 'CASH', scheduledDate } = req.body
+  const { customerId, items, stairFee = 0, note, paymentType = 'CASH', scheduledDate, callTime } = req.body
 
   if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: '缺少必要欄位' })
@@ -72,6 +72,11 @@ export async function createOrder(req: Request, res: Response) {
 
   // scheduledDate 沒傳或傳空字串就代表「今天」，存 NULL；有傳日期字串（YYYY-MM-DD）就存指定日期
   const finalScheduledDate = scheduledDate && String(scheduledDate).trim() ? scheduledDate : null
+
+  // callTime 沒傳就代表沒有更早的實際來電時間可回填，建單當下的時間就是最準的資訊，交給 SQL COALESCE(?, NOW()) 處理
+  // 前端 <input type="datetime-local"> 吐出來的格式是 "2026-07-18T14:30"（T 分隔），
+  // 這裡不做任何時區換算——輸入框上打的就是台北時間的字面值，只要把 T 換成空格讓 MySQL 看得懂就好
+  const finalCallTime = callTime && String(callTime).trim() ? String(callTime).replace('T', ' ') : null
 
   // 整筆建單（主表 + 品項 + 欠帳 + 客戶最後配送時間）用同一條連線跑交易，
   // 任何一步失敗就整體回滾，避免留下半套資料（訂單存在但品項缺漏、或 ar_balances 沒同步更新）
@@ -90,9 +95,9 @@ export async function createOrder(req: Request, res: Response) {
     }
 
     const [result] = await conn.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, scheduled_date)
-       VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
-      [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType, finalScheduledDate]
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, scheduled_date, call_time)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, COALESCE(?, NOW()))`,
+      [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType, finalScheduledDate, finalCallTime]
     ) as any
 
     const orderId = result.insertId

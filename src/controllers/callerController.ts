@@ -141,8 +141,8 @@ export async function incomingCall(req: Request, res: Response) {
     const totalAmount = quantity * unitPrice
 
     const [result] = await db.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
-       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?)`,
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
+       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?, NOW())`,
       [c.id, quantity, unitPrice, totalAmount, `來電自動草稿 ${normalized}`]
     ) as any
 
@@ -358,6 +358,14 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
     await db.query('UPDATE customers SET phone2 = ? WHERE id = ?', [normalized, customerId])
   }
 
+  // 綁定前先撈這支號碼「第一次來電」的真實時間，之後建單要用這個當 call_time，
+  // 不能用 NOW()——不然要是這通電話晾了幾小時才處理，訂單上顯示的來電時間會是處理時間、不是實際來電時間
+  const [unknownCallRows] = await db.query(
+    `SELECT first_called_at FROM unknown_calls WHERE phone = ? ORDER BY first_called_at DESC LIMIT 1`,
+    [normalized]
+  ) as any
+  const callTime = unknownCallRows[0]?.first_called_at || null
+
   // 這支號碼綁定到既有客戶了，把陌生來電紀錄標記已處理
   await db.query(
     `UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE phone = ? AND status = 'PENDING'`,
@@ -380,9 +388,9 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
-     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電綁定既有客戶草稿')`,
-    [customerId, quantity, unitPrice, totalAmount]
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電綁定既有客戶草稿', COALESCE(?, NOW()))`,
+    [customerId, quantity, unitPrice, totalAmount, callTime]
   ) as any
 
   const orderId = result.insertId
@@ -397,8 +405,20 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
 }
 
 export async function incomingCallById(req: Request, res: Response) {
-  const { customerId } = req.body
+  const { customerId, phone } = req.body
   if (!customerId) return res.status(400).json({ error: 'customerId required' })
+
+  // 如果前端有帶電話號碼，撈這支號碼「第一次來電」的真實時間當 call_time，
+  // 理由同 bindCallerToCustomer：這裡是「確認」的當下，不是「來電」的當下
+  let callTime: string | null = null
+  if (phone) {
+    const normalizedPhone = normalizePhone(phone)
+    const [unknownCallRows] = await db.query(
+      `SELECT first_called_at FROM unknown_calls WHERE phone = ? ORDER BY first_called_at DESC LIMIT 1`,
+      [normalizedPhone]
+    ) as any
+    callTime = unknownCallRows[0]?.first_called_at || null
+  }
 
   const [rows] = await db.query(
     `SELECT c.*, a.amount_owed FROM customers c 
@@ -427,9 +447,9 @@ export async function incomingCallById(req: Request, res: Response) {
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note)
-     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電草稿')`,
-    [c.id, quantity, unitPrice, totalAmount]
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電草稿', COALESCE(?, NOW()))`,
+    [c.id, quantity, unitPrice, totalAmount, callTime]
   ) as any
 
   const orderId = result.insertId
