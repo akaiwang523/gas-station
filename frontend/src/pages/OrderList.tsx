@@ -95,7 +95,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         params.status = filter
       }
       const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
-      console.log('DEBUG filter=', filter, 'orders count=', res.orders?.length, res.orders)
       setOrders(res.orders)
       setSummary(sum)
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
@@ -289,7 +288,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
       setDraftConfirmLoading(false)
     }
   }
-  const pending = orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
+  const pending = filter === 'SCHEDULED'
+  ? orders
+  : orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
   return (
     <div className="max-w-lg mx-auto p-4 space-y-4">
@@ -664,7 +665,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           ))}
         </div>
       )}
-      {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-12">今日暫無訂單</div>}
+      {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-12">{filter === 'SCHEDULED' ? '目前沒有排定的訂單' : '今日暫無訂單'}</div>}
       {/* 存氣登記 Modal */}
       {returnModal && (
         <div className="fixed inset-0 bg-black/50 flex items-end z-50">
