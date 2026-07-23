@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { api } from '../lib/api'
 
 const POLL_INTERVAL = 4000
 
@@ -7,6 +8,12 @@ interface DraftItem {
   quantity: number
   unitPrice: number
   subtotal: number
+}
+
+interface EditItem {
+  gasType: string
+  quantity: number
+  unitPrice: number
 }
 
 interface Draft {
@@ -25,14 +32,22 @@ interface Draft {
   createdAt: string
 }
 
+const GAS_LABELS: Record<string, string> = {
+  BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_10KG: '10kg', BOTTLED_4KG: '4kg',
+}
+const FALLBACK_PRICE: Record<string, number> = {
+  BOTTLED_20KG: 800, BOTTLED_16KG: 650, BOTTLED_10KG: 450, BOTTLED_4KG: 200,
+}
+
 export default function IncomingCallModal() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [unknownPhone, setUnknownPhone] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
-  const [editQty, setEditQty] = useState(1)
-  const [editPrice, setEditPrice] = useState(800)
-  const [editGasType, setEditGasType] = useState('BOTTLED_20KG')
+  const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>(FALLBACK_PRICE)
+  // 品項改成陣列，才能一次接單好幾種規格（例如 20kg 一桶 + 16kg 一桶），
+  // 而且會直接帶入上一單的所有品項，正常情況只要確認、有誤再改就好，不用整個重選
+  const [editItems, setEditItems] = useState<EditItem[]>([{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: FALLBACK_PRICE.BOTTLED_20KG }])
   const [scheduledDate, setScheduledDate] = useState('')
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
@@ -45,6 +60,20 @@ export default function IncomingCallModal() {
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
   const token = localStorage.getItem('token')
+
+  useEffect(() => {
+    api.getBaselinePrices()
+      .then(res => {
+        const raw: Record<string, number> = res.prices || {}
+        const valid: Record<string, number> = {}
+        for (const key of Object.keys(raw)) {
+          const v = Number(raw[key])
+          if (v > 0) valid[key] = v
+        }
+        setBaselinePrices(prev => ({ ...prev, ...valid }))
+      })
+      .catch(() => {})
+  }, [])
 
   // 抽成共用函式：輪詢計時器跟「確認/取消後立刻檢查下一筆」都呼叫這個
   const poll = useCallback(async () => {
@@ -62,9 +91,11 @@ export default function IncomingCallModal() {
           setDraft(data.draft)
           setUnknownPhone(null)
           setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
-          setEditQty(data.draft.items?.[0]?.quantity || 1)
-          setEditPrice(data.draft.items?.[0]?.unitPrice || 800)
-          setEditGasType(data.draft.items?.[0]?.gasType || 'BOTTLED_20KG')
+          setEditItems(
+            data.draft.items && data.draft.items.length > 0
+              ? data.draft.items.map((i: DraftItem) => ({ gasType: i.gasType, quantity: i.quantity, unitPrice: i.unitPrice }))
+              : [{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: baselinePrices.BOTTLED_20KG }]
+          )
           setScheduledDate('')
           setVisible(true)
         }
@@ -91,7 +122,7 @@ export default function IncomingCallModal() {
     } catch {
       // 靜默失敗
     }
-  }, [token])
+  }, [token, baselinePrices])
 
   useEffect(() => {
     if (!token) return
@@ -110,7 +141,7 @@ export default function IncomingCallModal() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ paymentType, quantity: editQty, unitPrice: editPrice, gasType: editGasType, scheduledDate })
+        body: JSON.stringify({ paymentType, items: editItems, scheduledDate })
       })
       setVisible(false)
       setDraft(null)
@@ -139,6 +170,25 @@ export default function IncomingCallModal() {
       // 立刻檢查有沒有下一筆排隊中的草稿
       poll()
     }
+  }
+
+  function updateEditItem(idx: number, field: keyof EditItem, value: string | number) {
+    setEditItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it
+      const updated = { ...it, [field]: value }
+      if (field === 'gasType') {
+        updated.unitPrice = baselinePrices[value as string] || FALLBACK_PRICE[value as string] || it.unitPrice
+      }
+      return updated
+    }))
+  }
+
+  function addEditItem() {
+    setEditItems(prev => [...prev, { gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: baselinePrices.BOTTLED_20KG }])
+  }
+
+  function removeEditItem(idx: number) {
+    setEditItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)
   }
 
   // 搜尋既有客戶（debounce 400ms）
@@ -387,40 +437,53 @@ export default function IncomingCallModal() {
           </div>
 
           <div>
-            <div className="text-gray-500 text-xs mb-2">品項（可修改）</div>
-            {/* 品項選擇 */}
-            <div className="flex gap-2 mb-3">
-              {['BOTTLED_20KG','BOTTLED_16KG','BOTTLED_10KG','BOTTLED_4KG'].map(type => (
-                <button
-                  key={type.replace("BOTTLED_","").replace("KG","kg")}
-                  onClick={() => setEditGasType(type)}
-                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editGasType === type ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
-                >
-                  {type.replace("BOTTLED_","").replace("KG","kg")}
-                </button>
+            <div className="text-gray-500 text-xs mb-2">品項（可修改，已帶入上次品項，只要確認或微調就好）</div>
+            <div className="space-y-2">
+              {editItems.map((item, idx) => (
+                <div key={idx} className="bg-gray-50 rounded-xl p-2.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-1.5 flex-wrap">
+                      {['BOTTLED_20KG', 'BOTTLED_16KG', 'BOTTLED_10KG', 'BOTTLED_4KG'].map(type => (
+                        <button
+                          key={type}
+                          onClick={() => updateEditItem(idx, 'gasType', type)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${item.gasType === type ? 'bg-orange-500 text-white' : 'bg-white border border-gray-200 text-gray-500'}`}
+                        >
+                          {GAS_LABELS[type]}
+                        </button>
+                      ))}
+                    </div>
+                    {editItems.length > 1 && (
+                      <button onClick={() => removeEditItem(idx)} className="text-red-400 text-lg font-bold ml-2">×</button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-1">
+                      <button onClick={() => updateEditItem(idx, 'quantity', Math.max(1, item.quantity - 1))} className="w-7 h-7 rounded-full bg-gray-200 font-bold">-</button>
+                      <span className="w-5 text-center font-medium text-sm">{item.quantity}</span>
+                      <button onClick={() => updateEditItem(idx, 'quantity', item.quantity + 1)} className="w-7 h-7 rounded-full bg-orange-400 text-white font-bold">+</button>
+                      <span className="text-gray-500 text-xs ml-0.5">桶</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-gray-500 text-sm">$</span>
+                      <input
+                        type="number"
+                        value={item.unitPrice}
+                        onChange={e => updateEditItem(idx, 'unitPrice', Number(e.target.value))}
+                        className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                      />
+                    </div>
+                    <div className="text-sm font-bold text-orange-600 w-16 text-right">${(item.quantity * item.unitPrice).toLocaleString()}</div>
+                  </div>
+                </div>
               ))}
             </div>
-            {/* 數量和價格 */}
-            <div className="flex items-center gap-2 py-2 border-b border-gray-100">
-              <div className="flex items-center gap-2 flex-1">
-                <button onClick={() => setEditQty(q => Math.max(1, q-1))} className="w-8 h-8 rounded-full bg-gray-200 font-bold text-lg">-</button>
-                <span className="w-6 text-center font-medium">{editQty}</span>
-                <button onClick={() => setEditQty(q => q+1)} className="w-8 h-8 rounded-full bg-orange-400 text-white font-bold text-lg">+</button>
-                <span className="text-gray-500 text-sm ml-1">桶</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 text-sm">$</span>
-                <input
-                  type="number"
-                  value={editPrice}
-                  onChange={e => setEditPrice(Number(e.target.value))}
-                  className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
-                />
-              </div>
-            </div>
-            <div className="flex justify-between items-center pt-2 font-bold text-orange-500 text-lg">
+            <button onClick={addEditItem} className="mt-2 w-full border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-2 text-sm font-medium">
+              + 新增品項
+            </button>
+            <div className="flex justify-between items-center pt-3 font-bold text-orange-500 text-lg">
               <span>合計</span>
-              <span>${editQty * editPrice}</span>
+              <span>${editItems.reduce((s, it) => s + it.quantity * it.unitPrice, 0).toLocaleString()}</span>
             </div>
           </div>
 

@@ -124,35 +124,65 @@ export async function incomingCall(req: Request, res: Response) {
       [new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }), draftId]
     )
   } else {
-    const [lastOrders] = await db.query(
-      `SELECT o.*, oi.gas_type, oi.quantity, oi.unit_price
-       FROM orders o
-       JOIN order_items oi ON oi.order_id = o.id
-       WHERE o.customer_id = ? AND o.status = 'DELIVERED'
-       ORDER BY o.created_at DESC LIMIT 1`,
+    // 抓上一次「已送達」訂單的所有品項（原本用 JOIN + LIMIT 1，品項多筆時 JOIN 出多列會被 LIMIT 1 直接砍到只剩第一項，
+    // 導致客戶明明訂 20kg+16kg 兩種，草稿卻只帶出其中一種——這裡先只鎖定訂單本身，再單獨撈出該筆訂單底下的全部品項）
+    const [lastOrderRows] = await db.query(
+      `SELECT id FROM orders WHERE customer_id = ? AND status = 'DELIVERED' ORDER BY created_at DESC LIMIT 1`,
       [c.id]
     ) as any
+    const lastOrderId = lastOrderRows[0]?.id
 
-    const lastOrder = lastOrders[0]
+    let lastItems: { gas_type: string; quantity: number }[] = []
+    if (lastOrderId) {
+      const [itemRows] = await db.query(
+        `SELECT gas_type, quantity FROM order_items WHERE order_id = ?`,
+        [lastOrderId]
+      ) as any
+      lastItems = itemRows
+    }
 
-    const gasType = lastOrder?.gas_type || c.gas_type || 'BOTTLED_20KG'
-    const quantity = lastOrder?.quantity || 1
-    const unitPrice = c.price_override || lastOrder?.unit_price || 800
-    const totalAmount = quantity * unitPrice
+    // 單價一律用「客戶目前該有的正確單價」：有特殊單價就用特殊單價，沒有就用目前的基準價，
+    // 不用上一單當時的歷史成交價（避免基準價調整後，草稿還帶出舊價格）
+    const [baselineRows] = await db.query(
+      `SELECT \`key\`, \`value\` FROM settings WHERE \`key\` LIKE 'baseline_price_%'`
+    ) as any
+    const baselinePrice: Record<string, number> = {}
+    for (const row of baselineRows) {
+      baselinePrice[row.key.replace('baseline_price_', '')] = Number(row.value)
+    }
+
+    const draftItems = lastItems.length > 0
+      ? lastItems.map((i) => ({
+          gasType: i.gas_type,
+          quantity: i.quantity,
+          unitPrice: c.price_override || baselinePrice[i.gas_type] || 800,
+        }))
+      : [{
+          gasType: c.gas_type || 'BOTTLED_20KG',
+          quantity: 1,
+          unitPrice: c.price_override || baselinePrice[c.gas_type] || baselinePrice.BOTTLED_20KG || 800,
+        }]
+
+    const totalAmount = draftItems.reduce((s, it) => s + it.quantity * it.unitPrice, 0)
+    const totalQuantity = draftItems.reduce((s, it) => s + it.quantity, 0)
+    // 主表 unit_price 是舊資料相容用的加權平均，實際品項明細以 order_items 為準
+    const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
 
     const [result] = await db.query(
       `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
        VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?, NOW())`,
-      [c.id, quantity, unitPrice, totalAmount, `來電自動草稿 ${normalized}`]
+      [c.id, totalQuantity, avgUnitPrice, totalAmount, `來電自動草稿 ${normalized}`]
     ) as any
 
     draftId = result.insertId
 
-    await db.query(
-      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
-       VALUES (?, ?, ?, ?, ?)`,
-      [draftId, gasType, quantity, unitPrice, totalAmount]
-    )
+    for (const it of draftItems) {
+      await db.query(
+        `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal)
+         VALUES (?, ?, ?, ?, ?)`,
+        [draftId, it.gasType, it.quantity, it.unitPrice, it.quantity * it.unitPrice]
+      )
+    }
   }
 
   const [draftRow] = await db.query('SELECT * FROM orders WHERE id = ?', [draftId]) as any
@@ -254,40 +284,45 @@ export async function getDraft(_req: Request, res: Response) {
 
 export async function confirmDraft(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const { paymentType, note, quantity, unitPrice, gasType, scheduledDate } = req.body
+  const { paymentType, note, items, scheduledDate } = req.body
 
   const [rows] = await db.query(`SELECT * FROM orders WHERE id = ? AND status = 'DRAFT'`, [id]) as any
   if (!rows[0]) return res.status(404).json({ error: '草稿不存在' })
 
   const order = rows[0]
-  const finalQty = Number(quantity) || order.quantity
-  const finalPrice = Number(unitPrice) || order.unit_price
-  const finalTotal = finalQty * finalPrice
-  const finalGasType = gasType || 'BOTTLED_20KG'
+
+  // items 是前端送來的完整品項陣列 [{ gasType, quantity, unitPrice }, ...]，
+  // 沒帶或是空陣列就退回用草稿原本主表上的單一品項當保底，避免舊版前端呼叫時整張單壞掉
+  const finalItems = Array.isArray(items) && items.length > 0
+    ? items.map((it: any) => ({
+        gasType: it.gasType || 'BOTTLED_20KG',
+        quantity: Number(it.quantity) || 1,
+        unitPrice: Number(it.unitPrice) || 0,
+      }))
+    : [{ gasType: 'BOTTLED_20KG', quantity: order.quantity, unitPrice: order.unit_price }]
+
+  const finalQty = finalItems.reduce((s: number, it: any) => s + it.quantity, 0)
+  const finalTotal = finalItems.reduce((s: number, it: any) => s + it.quantity * it.unitPrice, 0)
+  // 主表 unit_price 是舊資料相容用的加權平均，實際品項明細以 order_items 為準
+  const finalUnitPrice = finalQty > 0 ? finalTotal / finalQty : 0
 
   // scheduledDate 沒傳或傳空字串就代表「今天」，存 NULL；有傳日期字串（YYYY-MM-DD）就存指定日期
   const finalScheduledDate = scheduledDate && scheduledDate.trim() ? scheduledDate : null
 
-  console.log('confirmDraft debug:', { finalQty, finalPrice, finalTotal, finalGasType, finalScheduledDate, id })
+  console.log('confirmDraft debug:', { finalItems, finalQty, finalTotal, finalScheduledDate, id })
 
   await db.query(
     `UPDATE orders SET status = 'PENDING', payment_type = ?, note = ?, quantity = ?, unit_price = ?, total_amount = ?, scheduled_date = ? WHERE id = ?`,
-    [paymentType || order.payment_type, note || order.note, finalQty, finalPrice, finalTotal, finalScheduledDate, id]
+    [paymentType || order.payment_type, note || order.note, finalQty, finalUnitPrice, finalTotal, finalScheduledDate, id]
   )
 
-  const [existingItems] = await db.query(
-    `SELECT id FROM order_items WHERE order_id = ?`, [id]
-  ) as any
-
-  if (existingItems.length > 0) {
-    await db.query(
-      `UPDATE order_items SET gas_type = ?, quantity = ?, unit_price = ?, subtotal = ? WHERE order_id = ?`,
-      [finalGasType, finalQty, finalPrice, finalTotal, id]
-    )
-  } else {
+  // 品項整批換新：先刪掉草稿原本的品項，再依畫面上目前的品項清單重新寫入，
+  // 才能正確處理「新增品項」「移除品項」「改成好幾種規格」這些情況
+  await db.query(`DELETE FROM order_items WHERE order_id = ?`, [id])
+  for (const it of finalItems) {
     await db.query(
       `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
-      [id, finalGasType, finalQty, finalPrice, finalTotal]
+      [id, it.gasType, it.quantity, it.unitPrice, it.quantity * it.unitPrice]
     )
   }
 
