@@ -6,6 +6,7 @@ import ArPage from './pages/ArPage'
 import ReportPage from './pages/ReportPage'
 import CustomerPage from './pages/CustomerPage'
 import IncomingCallModal from './components/IncomingCallModal'
+import BaselinePriceSettings from './components/BaselinePriceSettings'
 import './index.css'
 
 type Page = 'orders' | 'new' | 'ar' | 'customers' | 'report'
@@ -15,6 +16,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('orders')
   const [orderRefresh, setOrderRefresh] = useState(0)
   const [customerEditId, setCustomerEditId] = useState<number | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
     const handler = () => setOrderRefresh(r => r + 1)
@@ -51,13 +53,24 @@ export default function App() {
       {/* Header */}
       <div className="bg-orange-500 text-white px-4 py-3 flex justify-between items-center sticky top-0 z-10 shadow">
         <span className="font-bold text-lg">🔥 瓦斯行管理</span>
-        <button
-          onClick={() => { localStorage.removeItem('token'); setAuthed(false) }}
-          className="text-orange-100 text-sm"
-        >
-          登出
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="text-orange-100 text-lg"
+            title="基準價設定"
+          >
+            🔧
+          </button>
+          <button
+            onClick={() => { localStorage.removeItem('token'); setAuthed(false) }}
+            className="text-orange-100 text-sm"
+          >
+            登出
+          </button>
+        </div>
       </div>
+
+      {showSettings && <BaselinePriceSettings onClose={() => setShowSettings(false)} />}
 
       {/* Content */}
       <div className="pt-2">

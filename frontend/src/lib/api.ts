@@ -113,4 +113,9 @@ export const api = {
     request('/gas-returns', { method: 'POST', body: JSON.stringify(data) }),
   resolveReturn: (id: number) =>
     request(`/gas-returns/${id}/resolve`, { method: 'PATCH' }),
+
+  // Settings
+  getBaselinePrices: () => request('/settings/baseline-prices'),
+  updateBaselinePrices: (prices: Record<string, number>) =>
+    request('/settings/baseline-prices', { method: 'PUT', body: JSON.stringify({ prices }) }),
 }

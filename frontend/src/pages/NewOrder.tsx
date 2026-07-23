@@ -32,7 +32,8 @@ const GAS_LABELS: Record<string, string> = {
   BOTTLED_4KG: '4kg 桶',
 }
 
-const GAS_DEFAULT_PRICE: Record<string, number> = {
+// 品項預設價的 fallback（僅在還沒抓到後端基準價之前使用）
+const FALLBACK_PRICE: Record<string, number> = {
   BOTTLED_20KG: 800,
   BOTTLED_16KG: 650,
   BOTTLED_10KG: 450,
@@ -40,6 +41,8 @@ const GAS_DEFAULT_PRICE: Record<string, number> = {
 }
 
 export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => void }) {
+  // 全站基準價（可在「🔧 基準價設定」調整），未設定特殊單價的客戶都以此為準
+  const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>(FALLBACK_PRICE)
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Customer[]>([])
   const [selected, setSelected] = useState<Customer | null>(null)
@@ -48,7 +51,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [newPhone, setNewPhone] = useState('')
   const [newAddress, setNewAddress] = useState('')
   const [items, setItems] = useState<Item[]>([
-    { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: 800 }
+    { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: FALLBACK_PRICE.BOTTLED_20KG }
   ])
   const [lastOrderHint, setLastOrderHint] = useState<string>('')
   const [pendingReturns, setPendingReturns] = useState<any[]>([])
@@ -61,6 +64,25 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    api.getBaselinePrices()
+      .then(res => {
+        const prices = res.prices || {}
+        // 只用有效（> 0）的數字覆蓋 fallback，避免資料庫尚未設定時把預設價蓋成 0
+        const valid = Object.fromEntries(Object.entries(prices).filter(([, v]) => Number(v) > 0))
+        setBaselinePrices(prev => ({ ...prev, ...valid }))
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    // 還沒選客戶、也還沒進入新客人流程時，品項單價要跟著最新的基準價走
+    // （避免頁面剛載入時，基準價還沒抓回來，先用了過期的 fallback 數字）
+    if (!selected && !isNew) {
+      setItems(prev => prev.map(item => ({ ...item, unit_price: baselinePrices[item.gas_type] ?? item.unit_price })))
+    }
+  }, [baselinePrices])
 
   useEffect(() => {
     if (search.length < 1) { setResults([]); return }
@@ -87,7 +109,9 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       setPendingReturns(pr.returns || [])
     } catch { setPendingReturns([]) }
 
-    // 帶出上一單（只認真的送達過的單，避免把取消/還沒處理完的單當成參考）
+    // 帶出上一單的品項/數量習慣（只認真的送達過的單，避免把取消/還沒處理完的單當成參考）
+    // 價格一律用客戶「目前」該有的正確單價：有設定特殊單價就用特殊單價，否則用目前的基準價；
+    // 不會用上一單當時成交的歷史單價，避免帶出過期價格。
     try {
       const res = await api.getOrders({ customerId: c.id, status: 'DELIVERED', limit: 1 })
       const last = res.orders?.[0]
@@ -95,16 +119,16 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         setItems(last.items.map((i: any) => ({
           gas_type: i.gas_type,
           quantity: i.quantity,
-          unit_price: i.unit_price,
+          unit_price: c.price_override || baselinePrices[i.gas_type] || i.unit_price,
         })))
         const hint = last.items.map((i: any) => `${GAS_LABELS[i.gas_type]} × ${i.quantity}`).join('、')
         setLastOrderHint(`上次：${hint}，共 $${Number(last.total_amount).toLocaleString()}`)
       } else {
-        setItems([{ gas_type: c.gas_type || 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || GAS_DEFAULT_PRICE[c.gas_type] || 800 }])
+        setItems([{ gas_type: c.gas_type || 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || baselinePrices[c.gas_type] || baselinePrices.BOTTLED_20KG }])
         setLastOrderHint('')
       }
     } catch {
-      setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || 800 }])
+      setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: c.price_override || baselinePrices.BOTTLED_20KG }])
       setLastOrderHint('')
     }
   }
@@ -119,7 +143,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   }
 
   function addItem() {
-    setItems(prev => [...prev, { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: 800 }])
+    setItems(prev => [...prev, { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: baselinePrices.BOTTLED_20KG }])
   }
 
   function removeItem(idx: number) {
@@ -131,7 +155,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       if (i !== idx) return item
       const updated = { ...item, [field]: value }
       if (field === 'gas_type') {
-        updated.unit_price = GAS_DEFAULT_PRICE[value as string] || 800
+        updated.unit_price = baselinePrices[value as string] || FALLBACK_PRICE[value as string] || 800
       }
       return updated
     }))
@@ -144,7 +168,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setNewName('')
     setNewPhone('')
     setNewAddress('')
-    setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: 800 }])
+    setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: baselinePrices.BOTTLED_20KG }])
     setStairFee(0)
     setPaymentType('CASH')
     setNote('')
