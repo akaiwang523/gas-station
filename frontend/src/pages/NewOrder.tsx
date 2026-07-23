@@ -68,9 +68,13 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   useEffect(() => {
     api.getBaselinePrices()
       .then(res => {
-        const prices = res.prices || {}
+        const raw: Record<string, number> = res.prices || {}
         // 只用有效（> 0）的數字覆蓋 fallback，避免資料庫尚未設定時把預設價蓋成 0
-        const valid = Object.fromEntries(Object.entries(prices).filter(([, v]) => Number(v) > 0))
+        const valid: Record<string, number> = {}
+        for (const key of Object.keys(raw)) {
+          const v = Number(raw[key])
+          if (v > 0) valid[key] = v
+        }
         setBaselinePrices(prev => ({ ...prev, ...valid }))
       })
       .catch(() => {})
