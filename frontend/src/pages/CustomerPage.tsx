@@ -138,7 +138,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
           setSaving(false)
           return
         }
-        data.delivery_cycle = form.delivery_cycle
+        data.delivery_cycle = (form.delivery_cycle === 'WEEKLY' || form.delivery_cycle === 'MONTHLY_FIXED') ? form.delivery_cycle : 'WEEKLY'
         data.delivery_day = deliveryDays.join(',')
         data.default_order_quantity = Number(form.default_order_quantity)
         data.default_unit_price = Number(form.default_unit_price)
@@ -348,7 +348,16 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
                 <input
                   type="checkbox"
                   checked={showFixedDelivery}
-                  onChange={e => setShowFixedDelivery(e.target.checked)}
+                  onChange={e => {
+                    const checked = e.target.checked
+                    setShowFixedDelivery(checked)
+                    // 下拉選單只有「每週固定」「每月固定」兩個選項，沒有 ON_CALL；
+                    // 勾選當下如果 delivery_cycle 還是 ON_CALL，瀏覽器畫面會誤顯示成第一個選項「每週固定」，
+                    // 但實際存的值仍是 ON_CALL，導致存檔時沒真的切換成固定配送。這裡把值同步成畫面看到的樣子。
+                    if (checked && form.delivery_cycle !== 'WEEKLY' && form.delivery_cycle !== 'MONTHLY_FIXED') {
+                      setForm(prev => ({ ...prev, delivery_cycle: 'WEEKLY' }))
+                    }
+                  }}
                   className="w-4 h-4 accent-orange-500"
                 />
                 <span className="text-sm font-medium text-gray-700">📅 固定配送客戶（自動排程建單）</span>

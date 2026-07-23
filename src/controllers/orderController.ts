@@ -1,8 +1,12 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
+// 還沒完成的訂單狀態：不管是哪一天建立/排定的，只要還沒送達就該一直看得到，
+// 不能被「只看今天」的預設日期限制擋住，否則昨天以前沒送出去的單會憑空消失
+const ACTIVE_STATUSES = ['PENDING', 'ASSIGNED', 'DELIVERING']
+
 export async function listOrders(req: Request, res: Response) {
-  const { status, date, customerId, limit = '10', all, upcoming } = req.query
+  const { status, date, customerId, limit = '200', all, upcoming } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
@@ -15,7 +19,7 @@ export async function listOrders(req: Request, res: Response) {
     } else if (date) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = ?')
       params.push(date)
-    } else if (!all && status !== 'DRAFT') {
+    } else if (!all && status !== 'DRAFT' && !ACTIVE_STATUSES.includes(String(status))) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = CURDATE()')
     }
   }
