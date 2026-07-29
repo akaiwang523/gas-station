@@ -78,7 +78,7 @@ export default function App() {
         {page === 'new' && <NewOrder onOrderCreated={handleOrderCreated} />}
         {page === 'ar' && <ArPage />}
         {page === 'customers' && <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />}
-        {page === 'report' && <ReportPage />}
+        {page === 'report' && <ReportPage onEditCustomer={handleEditCustomer} />}
       </div>
 
       {/* Bottom Nav */}

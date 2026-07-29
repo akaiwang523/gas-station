@@ -19,7 +19,7 @@ function getMonthOptions() {
   return options
 }
 
-export default function ReportPage() {
+export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (customerId: number) => void }) {
   const [activeTab, setActiveTab] = useState<'report' | 'orders'>('report')
   const [searchOrders, setSearchOrders] = useState<any[]>([])
   const [searchDate, setSearchDate] = useState('')
@@ -128,6 +128,13 @@ export default function ReportPage() {
   function editItemsTotal() {
     return editItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0)
   }
+  async function refreshCustomerHistory(customerId: number) {
+    const res = await api.getOrders({ customerId, all: true, limit: 200 })
+    const orders = res.orders.filter((x: any) => x.status !== 'CANCELLED')
+    const totalCylinders = orders.reduce((s: number, x: any) => s + Number(x.quantity), 0)
+    setCustomerHistory(prev => ({ ...prev, [customerId]: { orders, totalCylinders } }))
+  }
+
   async function saveOrderEdit(o: any) {
     if (editItems.length === 0) {
       alert('至少需要一個品項')
@@ -141,6 +148,10 @@ export default function ReportPage() {
       await api.updateOrder(o.id, { items, note: editNote })
       setEditingOrderId(null)
       await searchOrderHistory()
+      // 剛剛編輯的這筆可能來自「歷史訂單」清單，那份資料是另外快取的，要一併刷新才會同步
+      if (o.customer_id && customerHistory[o.customer_id]) {
+        await refreshCustomerHistory(o.customer_id)
+      }
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -370,6 +381,13 @@ export default function ReportPage() {
                       <div className="font-medium text-gray-800 flex items-center gap-1">
                         {o.customer_name}
                         <span className="text-xs text-gray-400">{expandedCustomerId === o.customer_id ? '▲' : '▼'}</span>
+                        {onEditCustomer && o.customer_id && (
+                          <button
+                            onClick={e => { e.stopPropagation(); onEditCustomer(o.customer_id) }}
+                            className="text-xs text-blue-500 ml-1"
+                            title="編輯客戶資料"
+                          >✏️ 客戶</button>
+                        )}
                       </div>
                       <div className="text-xs text-gray-500 mt-0.5">{new Date(o.created_at).toLocaleDateString('zh-TW')} · {o.customer_address}</div>
                       <div className="text-xs text-gray-500 mt-0.5">
@@ -405,24 +423,99 @@ export default function ReportPage() {
                               <div className="font-bold text-orange-500">{customerHistory[o.customer_id].orders.length} 筆</div>
                             </div>
                           </div>
-                          <div className="text-xs text-gray-500 font-medium">歷史訂單</div>
-                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                          <div className="text-xs text-gray-500 font-medium">歷史訂單（點一筆可編輯）</div>
+                          <div className="space-y-1 max-h-96 overflow-y-auto">
                             {customerHistory[o.customer_id].orders.map((h: any) => (
-                              <div key={h.id} className="flex justify-between items-center text-xs py-1 border-b border-gray-50">
-                                <div>
-                                  <span className="text-gray-600">{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
-                                  <span className="text-gray-400 ml-2">
-                                    {h.items?.length > 0
-                                      ? h.items.map((i: any) => `${i.gas_type.replace('BOTTLED_','').replace('KG','kg')}×${i.quantity}`).join('+')
-                                      : `${h.quantity}桶`}
-                                  </span>
+                              <div key={h.id} className="text-xs py-1 border-b border-gray-50">
+                                <div
+                                  className="flex justify-between items-center cursor-pointer"
+                                  onClick={() => toggleEditOrder(h)}
+                                >
+                                  <div>
+                                    <span className="text-gray-600">{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
+                                    <span className="text-gray-400 ml-2">
+                                      {h.items?.length > 0
+                                        ? h.items.map((i: any) => `${i.gas_type.replace('BOTTLED_','').replace('KG','kg')}×${i.quantity}`).join('+')
+                                        : `${h.quantity}桶`}
+                                    </span>
+                                    {h.status !== 'DELIVERED' && (
+                                      <span className="text-orange-500 ml-1">
+                                        {h.status === 'CANCELLED' ? '（已取消）' : '（待送）'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-right flex items-center gap-1">
+                                    <span className="font-medium text-gray-700">${Number(h.total_amount).toLocaleString()}</span>
+                                    <span className={h.payment_type === 'AR' ? 'text-red-400' : 'text-green-500'}>
+                                      {h.payment_type === 'AR' ? '欠' : '現'}
+                                    </span>
+                                    <span className="text-gray-300">{editingOrderId === h.id ? '▲' : '✏️'}</span>
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <span className="font-medium text-gray-700">${Number(h.total_amount).toLocaleString()}</span>
-                                  <span className={`ml-1 ${h.payment_type === 'AR' ? 'text-red-400' : 'text-green-500'}`}>
-                                    {h.payment_type === 'AR' ? '欠' : '現'}
-                                  </span>
-                                </div>
+                                {editingOrderId === h.id && (
+                                  <div className="mt-2 pt-2 border-t border-gray-100 space-y-2" onClick={e => e.stopPropagation()}>
+                                    {editItems.map((item, idx) => (
+                                      <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                                        <select
+                                          className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                          value={item.gasType}
+                                          onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                                        >
+                                          {Object.entries(GAS_LABELS).map(([val, label]) => (
+                                            <option key={val} value={val}>{label}</option>
+                                          ))}
+                                        </select>
+                                        <div className="flex-1">
+                                          <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                            value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
+                                        </div>
+                                        <div className="flex-1">
+                                          <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                            value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                                        </div>
+                                        <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
+                                          ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                                        </div>
+                                        <button
+                                          onClick={() => removeEditItem(idx)}
+                                          disabled={editItems.length <= 1}
+                                          className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
+                                          title="刪除此品項"
+                                        >✕</button>
+                                      </div>
+                                    ))}
+                                    <button
+                                      onClick={addEditItem}
+                                      className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
+                                    >＋ 新增品項（不同規格）</button>
+                                    <div className="text-xs text-gray-500">合計：${editItemsTotal().toLocaleString()}</div>
+                                    <div>
+                                      <label className="block text-xs text-gray-500 mb-1">備註</label>
+                                      <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                        value={editNote} onChange={e => setEditNote(e.target.value)} />
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button onClick={() => saveOrderEdit(h)} disabled={editSaving}
+                                        className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
+                                        {editSaving ? '儲存中...' : '💾 儲存修改'}
+                                      </button>
+                                      {h.status !== 'CANCELLED' && h.status !== 'DELIVERED' && (
+                                        <button
+                                          onClick={async () => { if (window.confirm('確定取消這筆？')) { await api.cancelOrder(h.id); setEditingOrderId(null); await refreshCustomerHistory(o.customer_id); await searchOrderHistory() } }}
+                                          className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-xs py-1.5 rounded-lg transition"
+                                        >取消</button>
+                                      )}
+                                      {(h.status === 'CANCELLED' || h.status === 'DELIVERED') && (
+                                        <button
+                                          onClick={async () => { if (window.confirm('確定刪除？刪除後無法復原。')) { try { await api.deleteOrder(h.id); setEditingOrderId(null); await refreshCustomerHistory(o.customer_id); await searchOrderHistory() } catch (e: any) { alert(e.message) } } }}
+                                          className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-xs py-1.5 rounded-lg transition"
+                                        >🗑 刪除</button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
