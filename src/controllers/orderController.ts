@@ -6,12 +6,20 @@ import { db } from '../lib/db'
 const ACTIVE_STATUSES = ['PENDING', 'ASSIGNED', 'DELIVERING']
 
 export async function listOrders(req: Request, res: Response) {
-  const { status, date, customerId, limit = '200', all, upcoming } = req.query
+  const { status, date, customerId, customerSearch, limit = '200', all, upcoming } = req.query
   const conditions: string[] = []
   const params: any[] = []
 
   if (status) { conditions.push('o.status = ?'); params.push(status) }
   if (customerId) { conditions.push('o.customer_id = ?'); params.push(customerId) }
+  if (customerSearch) {
+    // 客戶姓名/電話搜尋要在資料庫層先篩選，篩選完才套用筆數上限——
+    // 不然像「訂單查詢」那種不指定日期、單純搜客戶名字的用法，會先被 LIMIT 砍到只剩最近 N 筆
+    // 全部客戶混在一起的訂單，這位客戶比較久以前的訂單就會憑空從搜尋結果消失
+    conditions.push('(c.name LIKE ? OR c.phone LIKE ? OR c.phone2 LIKE ?)')
+    const kw = `%${customerSearch}%`
+    params.push(kw, kw, kw)
+  }
   if (!customerId) {
     if (upcoming) {
       // 已排定未來配送日的訂單（不含今天），讓首頁有地方能查到、編輯這些單
@@ -19,7 +27,7 @@ export async function listOrders(req: Request, res: Response) {
     } else if (date) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = ?')
       params.push(date)
-    } else if (!all && status !== 'DRAFT' && !ACTIVE_STATUSES.includes(String(status))) {
+    } else if (!customerSearch && !all && status !== 'DRAFT' && !ACTIVE_STATUSES.includes(String(status))) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = CURDATE()')
     }
   }

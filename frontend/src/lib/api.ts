@@ -54,12 +54,13 @@ export const api = {
     request('/customers/merge', { method: 'POST', body: JSON.stringify({ keepId, mergeId }) }),
 
   // Orders
-  getOrders: (params?: { status?: string; date?: string; driverId?: number; customerId?: number; limit?: number; all?: boolean; upcoming?: boolean }) => {
+  getOrders: (params?: { status?: string; date?: string; driverId?: number; customerId?: number; customerSearch?: string; limit?: number; all?: boolean; upcoming?: boolean }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
     if (params?.date) q.set('date', params.date)
     if (params?.driverId) q.set('driverId', String(params.driverId))
     if (params?.customerId) q.set('customerId', String(params.customerId))
+    if (params?.customerSearch) q.set('customerSearch', params.customerSearch)
     if (params?.limit) q.set('limit', String(params.limit))
     if (params?.all) q.set('all', '1')
     if (params?.upcoming) q.set('upcoming', '1')

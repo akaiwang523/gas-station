@@ -90,11 +90,9 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
     try {
       const params: any = { all: true, limit: 200 }
       if (searchDate) params.date = searchDate
+      if (searchCustomer) params.customerSearch = searchCustomer
       const res = await api.getOrders(params)
-      const filtered = searchCustomer
-        ? res.orders.filter((o: any) => o.customer_name?.includes(searchCustomer) || o.customer_phone?.includes(searchCustomer))
-        : res.orders
-      setSearchOrders(filtered)
+      setSearchOrders(res.orders)
     } finally {
       setSearchLoading(false)
     }
