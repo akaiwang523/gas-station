@@ -745,6 +745,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               <div className="flex justify-between items-start">
                 <div>
                   <span className="font-medium text-gray-600">{order.customer_name}</span>
+                  {onEditCustomer && (
+                    <button
+                      onClick={() => onEditCustomer(order.customer_id)}
+                      className="text-xs text-blue-500 ml-2 align-middle"
+                      title="編輯客戶資料"
+                    >✏️ 客戶</button>
+                  )}
                   <div className="text-xs text-gray-400 mt-0.5">{order.customer_address}</div>
                   {order.items && order.items.length > 0 && (
                     <div className="text-xs text-gray-400 mt-0.5">
