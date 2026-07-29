@@ -383,9 +383,15 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
 
   const customerId = binding[0].customer_id
   const [customers] = await db.query(
-    `SELECT price_override, default_unit_price FROM customers WHERE id = ?`, [customerId]
+    `SELECT price_override FROM customers WHERE id = ?`, [customerId]
   ) as any
-  const unitPrice = customers[0]?.price_override || customers[0]?.default_unit_price || 800
+  // 單價統一跟其他進單管道（快速接單/來電草稿/固定配送自動建單）同一套邏輯：
+  // 優先用客戶的特殊單價，沒有就用目前的基準價，不使用已經停用的 default_unit_price 欄位
+  const [baselineRows] = await db.query(
+    `SELECT \`value\` FROM settings WHERE \`key\` = ?`, [`baseline_price_${gasType}`]
+  ) as any
+  const baselinePrice = baselineRows[0] ? Number(baselineRows[0].value) : 800
+  const unitPrice = customers[0]?.price_override || baselinePrice
   const totalAmount = qty * unitPrice
 
   const conn = await db.getConnection()
