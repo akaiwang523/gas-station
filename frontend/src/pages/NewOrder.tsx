@@ -81,9 +81,10 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   }, [])
 
   useEffect(() => {
-    // 還沒選客戶、也還沒進入新客人流程時，品項單價要跟著最新的基準價走
-    // （避免頁面剛載入時，基準價還沒抓回來，先用了過期的 fallback 數字）
-    if (!selected && !isNew) {
+    // 只要還沒選到「某位已存在客戶的既定資料」，品項單價都要持續跟著最新基準價走——
+    // 包含「新客人」這個狀態在內：如果基準價 API 剛好比使用者點「新客人」還晚回來，
+    // 沒有這個同步就會讓新客人的單永遠卡在寫死的 fallback 800，追不上真正的基準價
+    if (!selected) {
       setItems(prev => prev.map(item => ({ ...item, unit_price: baselinePrices[item.gas_type] ?? item.unit_price })))
     }
   }, [baselinePrices])
