@@ -5,51 +5,59 @@ const WEEKDAY_LABEL = ['週日', '週一', '週二', '週三', '週四', '週五
 
 // 配送熱點分析：星期幾規律（排兼職班表用）+ 行政區熱區（依配送訂單量，不是客戶數）
 export async function getHotspots(req: Request, res: Response) {
-  const days = Number(req.query.days) || 90
+  try {
+    const days = Number(req.query.days) || 90
 
-  // 星期規律：抓每一天的訂單數/桶數，再依星期幾分組平均——
-  // 用「平均」而不是「加總」，是因為區間裡每個星期幾出現的次數本來就不一定剛好相等
-  const [daily] = await db.query(
-    `SELECT DATE(created_at) as d, DAYOFWEEK(created_at) as dow, COUNT(*) as cnt, SUM(quantity) as cyl
-     FROM orders
-     WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND status != 'CANCELLED'
-     GROUP BY DATE(created_at)`,
-    [days]
-  ) as any
+    // 星期規律：抓每一天的訂單數/桶數，再依星期幾分組平均——
+    // 用「平均」而不是「加總」，是因為區間裡每個星期幾出現的次數本來就不一定剛好相等
+    // 注意：DAYOFWEEK(created_at) 邏輯上完全由 DATE(created_at) 決定，但 MySQL 的
+    // only_full_group_by 不會自動判斷函式之間的相依性，兩個運算式都要放進 GROUP BY，
+    // 不然會直接噴錯——這支查詢每次載入報表頁都會呼叫，噴錯若沒被 catch 到會讓整個服務當機重開
+    const [daily] = await db.query(
+      `SELECT DATE(created_at) as d, DAYOFWEEK(created_at) as dow, COUNT(*) as cnt, SUM(quantity) as cyl
+       FROM orders
+       WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND status != 'CANCELLED'
+       GROUP BY DATE(created_at), DAYOFWEEK(created_at)`,
+      [days]
+    ) as any
 
-  const byWeekday: Record<number, { days: number; orders: number; cylinders: number }> = {}
-  for (let i = 0; i < 7; i++) byWeekday[i] = { days: 0, orders: 0, cylinders: 0 }
-  for (const row of daily) {
-    const dow = row.dow - 1 // MySQL DAYOFWEEK: 1=週日...7=週六，轉成 0=週日...6=週六
-    byWeekday[dow].days += 1
-    byWeekday[dow].orders += Number(row.cnt)
-    byWeekday[dow].cylinders += Number(row.cyl || 0)
+    const byWeekday: Record<number, { days: number; orders: number; cylinders: number }> = {}
+    for (let i = 0; i < 7; i++) byWeekday[i] = { days: 0, orders: 0, cylinders: 0 }
+    for (const row of daily) {
+      const dow = row.dow - 1 // MySQL DAYOFWEEK: 1=週日...7=週六，轉成 0=週日...6=週六
+      byWeekday[dow].days += 1
+      byWeekday[dow].orders += Number(row.cnt)
+      byWeekday[dow].cylinders += Number(row.cyl || 0)
+    }
+    const weekdayPattern = Object.entries(byWeekday).map(([dow, v]) => ({
+      weekday: Number(dow),
+      label: WEEKDAY_LABEL[Number(dow)],
+      avgOrders: v.days > 0 ? Math.round((v.orders / v.days) * 10) / 10 : 0,
+      avgCylinders: v.days > 0 ? Math.round((v.cylinders / v.days) * 10) / 10 : 0,
+      sampleDays: v.days,
+    }))
+
+    // 行政區熱區：依配送訂單量排序（訂單筆數、桶數），不是客戶數多寡
+    const [districts] = await db.query(
+      `SELECT COALESCE(NULLIF(TRIM(c.district), ''), '未分類') as district,
+         COUNT(*) as order_count, SUM(o.quantity) as cylinders
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       WHERE o.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND o.status != 'CANCELLED'
+       GROUP BY district
+       ORDER BY cylinders DESC`,
+      [days]
+    ) as any
+
+    res.json({
+      days,
+      weekdayPattern,
+      districtHotspots: districts,
+    })
+  } catch (err) {
+    console.error('[getHotspots]', err)
+    res.status(500).json({ error: '熱點分析失敗' })
   }
-  const weekdayPattern = Object.entries(byWeekday).map(([dow, v]) => ({
-    weekday: Number(dow),
-    label: WEEKDAY_LABEL[Number(dow)],
-    avgOrders: v.days > 0 ? Math.round((v.orders / v.days) * 10) / 10 : 0,
-    avgCylinders: v.days > 0 ? Math.round((v.cylinders / v.days) * 10) / 10 : 0,
-    sampleDays: v.days,
-  }))
-
-  // 行政區熱區：依配送訂單量排序（訂單筆數、桶數），不是客戶數多寡
-  const [districts] = await db.query(
-    `SELECT COALESCE(NULLIF(TRIM(c.district), ''), '未分類') as district,
-       COUNT(*) as order_count, SUM(o.quantity) as cylinders
-     FROM orders o
-     JOIN customers c ON c.id = o.customer_id
-     WHERE o.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND o.status != 'CANCELLED'
-     GROUP BY district
-     ORDER BY cylinders DESC`,
-    [days]
-  ) as any
-
-  res.json({
-    days,
-    weekdayPattern,
-    districtHotspots: districts,
-  })
 }
 
 // 今日快覽
