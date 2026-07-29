@@ -70,9 +70,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [predExpanded, setPredExpanded] = useState(false)
   const [drafts, setDrafts] = useState<Order[]>([])
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
-  const [draftGasType, setDraftGasType] = useState('BOTTLED_20KG')
-  const [draftQty, setDraftQty] = useState('1')
-  const [draftPrice, setDraftPrice] = useState('800')
+  const [draftItems, setDraftItems] = useState<{ gasType: string; quantity: string; unitPrice: string }[]>([{ gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: '800' }])
   const [draftPaymentType, setDraftPaymentType] = useState('CASH')
   const [draftScheduledDate, setDraftScheduledDate] = useState('')
   const [draftConfirmLoading, setDraftConfirmLoading] = useState(false)
@@ -86,6 +84,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [editPaymentType, setEditPaymentType] = useState('CASH')
   const [editLoading, setEditLoading] = useState(false)
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
+  // 待送分頁多選批次標記完成（處理「其實已經送完但忘記點完成」累積下來的舊單）
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkLoading, setBulkLoading] = useState(false)
   async function load() {
     setLoading(true)
     try {
@@ -256,16 +258,59 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     try { await api.deleteOrder(id); await load() }
     finally { setActionId(null) }
   }
+  function toggleSelectMode() {
+    setSelectMode(prev => !prev)
+    setSelectedIds(new Set())
+  }
+  function toggleSelectOrder(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  function selectAllPending() {
+    setSelectedIds(new Set(pending.map(o => o.id)))
+  }
+  async function bulkMarkDelivered() {
+    if (selectedIds.size === 0) return
+    if (!window.confirm(`確定要把選取的 ${selectedIds.size} 筆訂單標記為「已完成」嗎？請先確認這些單真的都已經送達。`)) return
+    setBulkLoading(true)
+    try {
+      await api.bulkUpdateOrderStatus([...selectedIds], 'DELIVERED')
+      setSelectMode(false)
+      setSelectedIds(new Set())
+      await load()
+    } catch (e: any) {
+      alert(e.message || '批次更新失敗')
+    } finally {
+      setBulkLoading(false)
+    }
+  }
   // 展開來電草稿的核對表單（品項/付款方式/預約日期），取代舊版直接呼叫 updateOrderStatus
   // 跳過所有核對的快速確認鈕——那條路徑不會寫 scheduled_date，付款方式也永遠停在建草稿時的預設 CASH
   function openDraftConfirm(d: Order) {
     setDraftEditId(d.id)
-    const firstItem = d.items?.[0]
-    setDraftGasType(firstItem?.gas_type || 'BOTTLED_20KG')
-    setDraftQty(String(firstItem?.quantity ?? d.quantity ?? 1))
-    setDraftPrice(String(firstItem?.unit_price ?? d.unit_price ?? 800))
+    setDraftItems(
+      d.items && d.items.length > 0
+        ? d.items.map((i: any) => ({ gasType: i.gas_type, quantity: String(i.quantity), unitPrice: String(i.unit_price) }))
+        : [{ gasType: 'BOTTLED_20KG', quantity: String(d.quantity ?? 1), unitPrice: String(d.unit_price ?? 800) }]
+    )
     setDraftPaymentType(d.payment_type || 'CASH')
     setDraftScheduledDate('')
+  }
+  function updateDraftItem(idx: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
+    setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+  }
+  function addDraftItem() {
+    setDraftItems(prev => [...prev, { gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: prev[prev.length - 1]?.unitPrice || '800' }])
+  }
+  function removeDraftItem(idx: number) {
+    setDraftItems(prev => prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx))
+  }
+  function draftItemsTotal() {
+    return draftItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0)
   }
   function closeDraftConfirm() {
     setDraftEditId(null)
@@ -275,9 +320,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     try {
       await api.confirmDraft(id, {
         paymentType: draftPaymentType,
-        quantity: Number(draftQty),
-        unitPrice: Number(draftPrice),
-        gasType: draftGasType,
+        items: draftItems.map(i => ({ gasType: i.gasType, quantity: Number(i.quantity) || 1, unitPrice: Number(i.unitPrice) || 0 })),
         scheduledDate: draftScheduledDate,
       })
       setDraftEditId(null)
@@ -352,27 +395,49 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 </div>
                 {draftEditId === d.id && (
                   <div className="mt-3 pt-3 border-t border-orange-100 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        value={draftGasType}
-                        onChange={e => setDraftGasType(e.target.value)}
+                    <div className="space-y-2">
+                      {draftItems.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <select
+                            className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.gasType}
+                            onChange={e => updateDraftItem(idx, 'gasType', e.target.value)}
+                          >
+                            {Object.entries(GAS_LABELS).map(([val, label]) => (
+                              <option key={val} value={val}>{label}</option>
+                            ))}
+                          </select>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                            <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                              value={item.quantity} onChange={e => updateDraftItem(idx, 'quantity', e.target.value)} />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                            <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                              value={item.unitPrice} onChange={e => updateDraftItem(idx, 'unitPrice', e.target.value)} />
+                          </div>
+                          <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
+                            ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                          </div>
+                          <button
+                            onClick={() => removeDraftItem(idx)}
+                            disabled={draftItems.length <= 1}
+                            className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
+                            title="刪除此品項"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={addDraftItem}
+                        className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
                       >
-                        {Object.entries(GAS_LABELS).map(([val, label]) => (
-                          <option key={val} value={val}>{label}</option>
-                        ))}
-                      </select>
-                      <div className="flex-1">
-                        <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
-                        <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                          value={draftQty} onChange={e => setDraftQty(e.target.value)} />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-xs text-gray-400 mb-0.5">單價</label>
-                        <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                          value={draftPrice} onChange={e => setDraftPrice(e.target.value)} />
-                      </div>
+                        ＋ 新增品項（不同規格）
+                      </button>
                     </div>
+                    <div className="text-xs text-gray-500">合計：${draftItemsTotal().toLocaleString()}</div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">付款方式</label>
                       <div className="flex gap-2">
@@ -445,18 +510,51 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           </button>
         ))}
         <button onClick={load} className="flex-shrink-0 px-3 py-1.5 rounded-full text-sm bg-gray-100 text-gray-600">🔄</button>
+        {pending.length > 0 && (
+          <button
+            onClick={toggleSelectMode}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${selectMode ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+          >
+            ☑️ 多選
+          </button>
+        )}
       </div>
+      {selectMode && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-2 sticky top-2 z-10">
+          <div className="text-sm text-orange-800 font-medium">已選 {selectedIds.size} 筆</div>
+          <div className="flex gap-2">
+            <button onClick={selectAllPending} className="px-3 py-1.5 bg-white border border-orange-200 text-orange-600 text-xs font-bold rounded-lg">全選</button>
+            <button
+              onClick={bulkMarkDelivered}
+              disabled={selectedIds.size === 0 || bulkLoading}
+              className="px-3 py-1.5 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white text-xs font-bold rounded-lg"
+            >
+              {bulkLoading ? '處理中...' : `✅ 標記完成 (${selectedIds.size})`}
+            </button>
+          </div>
+        </div>
+      )}
       {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
       {!loading && pending.length > 0 && (
         <div className="space-y-3">
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
             return (
-            <div key={order.id} className={`bg-white border border-gray-200 border-l-4 ${STATUS_BORDER[order.status]} rounded-xl p-4 shadow-sm`}>
-              {/* 卡片主體 - 點擊展開 */}
-              <div className="cursor-pointer" onClick={() => toggleExpand(order)}>
+            <div key={order.id} className={`bg-white border border-gray-200 border-l-4 ${STATUS_BORDER[order.status]} rounded-xl p-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+              {/* 卡片主體 - 點擊展開（多選模式下改成點擊勾選） */}
+              <div className="cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start mb-1">
-                  <div>
+                  <div className="flex items-start gap-2">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(order.id)}
+                        onChange={() => toggleSelectOrder(order.id)}
+                        onClick={e => e.stopPropagation()}
+                        className="w-5 h-5 mt-0.5 accent-orange-500 flex-shrink-0"
+                      />
+                    )}
+                    <div>
                     <span className="font-bold text-gray-800">{order.customer_name}</span>
                     <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
                     {onEditCustomer && (
@@ -466,6 +564,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         title="編輯客戶資料"
                       >✏️ 客戶</button>
                     )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2.5">
                     {order.scheduled_date && (

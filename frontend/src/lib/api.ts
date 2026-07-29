@@ -71,6 +71,8 @@ export const api = {
     request('/orders', { method: 'POST', body: JSON.stringify(data) }),
   updateOrderStatus: (id: number, status: string, driverId?: number) =>
     request(`/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, driverId }) }),
+  bulkUpdateOrderStatus: (orderIds: number[], status: string) =>
+    request('/orders/bulk-status', { method: 'PATCH', body: JSON.stringify({ orderIds, status }) }),
   collectPayment: (orderId: number, data: any) =>
     request(`/orders/${orderId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
 
@@ -97,7 +99,7 @@ export const api = {
     request(`/orders/${id}/cancel`, { method: 'PATCH' }),
   deleteOrder: (id: number) =>
     request(`/orders/${id}`, { method: 'DELETE' }),
-  confirmDraft: (id: number, data: { paymentType?: string; quantity?: number; unitPrice?: number; gasType?: string; scheduledDate?: string; note?: string }) =>
+  confirmDraft: (id: number, data: { paymentType?: string; items?: { gasType: string; quantity: number; unitPrice: number }[]; scheduledDate?: string; note?: string }) =>
     request(`/caller/draft/${id}/confirm`, { method: 'POST', body: JSON.stringify(data) }),
   cancelDraft: (id: number) =>
     request(`/caller/draft/${id}`, { method: 'DELETE' }),

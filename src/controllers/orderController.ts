@@ -155,6 +155,31 @@ export async function updateOrderStatus(req: Request, res: Response) {
   res.json({ ok: true })
 }
 
+// 批次標記多筆訂單狀態（例如「待送」分頁多選好幾筆一次標記完成）
+export async function bulkUpdateOrderStatus(req: Request, res: Response) {
+  const { orderIds, status } = req.body
+
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return res.status(400).json({ error: '缺少要更新的訂單清單' })
+  }
+  const ids = orderIds.map((v: any) => Number(v)).filter((n: number) => Number.isInteger(n))
+  if (ids.length === 0) {
+    return res.status(400).json({ error: '訂單編號格式錯誤' })
+  }
+  if (!status) {
+    return res.status(400).json({ error: '缺少目標狀態' })
+  }
+
+  const placeholders = ids.map(() => '?').join(',')
+  const updates = ['status = ?']
+  const params: any[] = [status]
+  if (status === 'DELIVERED') updates.push('delivered_at = NOW()')
+  params.push(...ids)
+
+  await db.query(`UPDATE orders SET ${updates.join(', ')} WHERE id IN (${placeholders})`, params)
+  res.json({ ok: true, updated: ids.length })
+}
+
 export async function collectPayment(req: Request, res: Response) {
   const orderId = Number(req.params.id)
   const { amount, method = 'CASH', note } = req.body
