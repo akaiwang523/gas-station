@@ -327,10 +327,9 @@ export async function updateOrder(req: Request, res: Response) {
       await conn.rollback()
       return res.status(404).json({ error: '訂單不存在' })
     }
-    if (oldOrder.status === 'DELIVERED' || oldOrder.status === 'CANCELLED') {
-      await conn.rollback()
-      return res.status(400).json({ error: '已完成或已取消的訂單無法修改' })
-    }
+    // 原本這裡會擋掉已完成/已取消的訂單不給改，但實際使用情境常常是「送完之後才發現當初單價/品項打錯」，
+    // 需要回頭修正歷史紀錄——欠帳校正邏輯（下面）是抓舊付款方式跟新付款方式的差額調整，跟訂單狀態無關，
+    // 不管訂單是哪個狀態都一樣安全，所以拿掉這個限制
 
     // 找出目前資料庫裡實際存在的品項 id，用來判斷哪些被使用者刪除了
     const [existingRows] = await conn.query('SELECT id FROM order_items WHERE order_id = ?', [id]) as any
