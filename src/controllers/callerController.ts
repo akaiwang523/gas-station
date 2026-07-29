@@ -108,10 +108,15 @@ export async function incomingCall(req: Request, res: Response) {
 
   const c = rows[0]
 
-  // 同一客戶若已經有一筆尚未處理的草稿單，就不重複建單，沿用既有那筆
+  // 同一客戶若「今天」還有一筆尚未送達的單（草稿、待送、已指派、配送中都算），
+  // 再次來電就沿用既有那筆、標記再次來電時間，不重複建單——
+  // 原本只檢查 DRAFT 狀態，漏掉了「已經確認成待送、但還沒出貨」這個常見情況。
+  // 限制在「當天」是刻意的：如果哪張單忘記點完成、卡了好幾天，不會因此讓之後
+  // 每一次來電都硬要沿用那張過期的舊單，跨天就當成新需求重新開一張
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
-    [c.id]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
+    [c.id, todayStr]
   ) as any
 
   let draftId: number
