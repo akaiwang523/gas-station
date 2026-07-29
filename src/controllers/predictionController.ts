@@ -12,6 +12,14 @@ export async function getPredictions(req: Request, res: Response) {
        HAVING order_count >= 3`
     ) as any
 
+    // 「取消提醒」的紀錄：只要取消時間晚於這位客戶最後一筆訂單，就代表這一輪提醒已經被處理過了，先跳過；
+    // 之後只要幫他建了新訂單，最後一筆訂單時間就會比取消時間新，下一輪預測會自動恢復顯示，不用另外清除紀錄
+    const [dismissals] = await db.query(`SELECT customer_id, dismissed_at FROM prediction_dismissals`) as any
+    const dismissedAt: Record<number, number> = {}
+    for (const d of dismissals) {
+      dismissedAt[d.customer_id] = new Date(d.dismissed_at).getTime()
+    }
+
     const predictions = []
 
     for (const customer of customers) {
@@ -28,6 +36,10 @@ export async function getPredictions(req: Request, res: Response) {
 
       if (orders.length < 3) continue
 
+      // 這一輪提醒被取消過，而且之後沒有新訂單進來，就先不顯示
+      const lastOrderTime = new Date(orders[0].created_at).getTime()
+      if (dismissedAt[customer.id] && dismissedAt[customer.id] >= lastOrderTime) continue
+
       // 計算 3 個間隔天數的平均
       const dates = orders.map((o: any) => new Date(o.created_at).getTime())
       const intervals = []
@@ -40,10 +52,11 @@ export async function getPredictions(req: Request, res: Response) {
       const lastOrderDate = new Date(orders[0].created_at)
       const predictedDate = new Date(lastOrderDate.getTime() + avgInterval * 24 * 60 * 60 * 1000)
 
-      // 只回傳昨天、今天、明天的
+      // 上限：明天以內才提前顯示（不用太早打擾客戶）；沒有下限——
+      // 預測日期一旦到了，就會持續出現在清單裡，直到真的幫他建單為止，
+      // 不會因為老闆哪天剛好沒開系統檢查，就永久錯過這個客戶（原本用「昨天~明天」3天窗口會有這個問題）
       const today = new Date()
       today.setHours(0, 0, 0, 0)
-      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
       const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000)
       const predictedDay = new Date(predictedDate)
       predictedDay.setHours(0, 0, 0, 0)
@@ -56,12 +69,14 @@ export async function getPredictions(req: Request, res: Response) {
       ) as any
       if ((todayOrders as any[]).length > 0) continue
 
-      if (predictedDay >= yesterday && predictedDay <= tomorrow) {
+      if (predictedDay <= tomorrow) {
+        const overdueDays = Math.round((today.getTime() - predictedDay.getTime()) / (1000 * 60 * 60 * 24))
         predictions.push({
           customerId: customer.id,
           customerName: customer.name,
           customerPhone: customer.phone,
           predictedDate: predictedDate.toISOString().slice(0, 10),
+          overdueDays,
           avgInterval: Math.round(avgInterval),
           lastGasType: orders[0].gas_type,
           lastQuantity: orders[0].quantity,
@@ -70,9 +85,25 @@ export async function getPredictions(req: Request, res: Response) {
       }
     }
 
+    // 拖越久沒問的排越前面，最需要優先聯絡的客戶先看到
+    predictions.sort((a, b) => b.overdueDays - a.overdueDays)
+
     res.json({ predictions })
   } catch (err) {
     console.error('[getPredictions]', err)
     res.status(500).json({ error: '預測失敗' })
   }
+}
+
+// 取消這位客戶「這一輪」的預測提醒；下次他有新訂單進來，就會自動重新開始下一輪預測
+export async function dismissPrediction(req: Request, res: Response) {
+  const customerId = Number(req.params.customerId)
+  if (!customerId) return res.status(400).json({ error: '缺少客戶編號' })
+
+  await db.query(
+    `INSERT INTO prediction_dismissals (customer_id, dismissed_at) VALUES (?, NOW())
+     ON DUPLICATE KEY UPDATE dismissed_at = NOW()`,
+    [customerId]
+  )
+  res.json({ ok: true })
 }

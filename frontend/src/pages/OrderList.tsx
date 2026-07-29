@@ -488,9 +488,20 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           {predExpanded && (
             <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
               {predictions.map(p => (
-                <div key={p.customerId} className="flex-shrink-0 w-48 bg-white rounded-xl p-3 border border-blue-200 shadow-sm">
-                  <div className="font-bold text-gray-800 text-sm truncate">{p.customerName}</div>
+                <div key={p.customerId} className="flex-shrink-0 w-48 bg-white rounded-xl p-3 border border-blue-200 shadow-sm relative">
+                  <button
+                    onClick={async () => {
+                      setPredictions(prev => prev.filter(x => x.customerId !== p.customerId))
+                      try { await api.dismissPrediction(p.customerId) } catch { /* 失敗就算了，下次重新整理還是會抓到最新狀態 */ }
+                    }}
+                    className="absolute top-1.5 right-1.5 text-gray-300 hover:text-gray-500 text-sm w-5 h-5 flex items-center justify-center"
+                    title="取消這一輪提醒（下次他有新訂單才會重新提醒）"
+                  >✕</button>
+                  <div className="font-bold text-gray-800 text-sm truncate pr-4">{p.customerName}</div>
                   <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
+                  {p.overdueDays > 0 && (
+                    <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
+                  )}
                   <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
                   <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
                   <a
