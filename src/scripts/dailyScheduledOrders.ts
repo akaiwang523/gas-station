@@ -71,6 +71,17 @@ export async function runDailyScheduledOrders() {
   ) as any
   const fixedCustomers = customers as FixedCustomer[]
 
+  // 單價跟「快速接單」「來電草稿」用同一套邏輯：優先用客戶的特殊單價，沒有就用目前的基準價。
+  // 不能用客戶身上 default_unit_price 這個欄位當主要依據——那是設定固定配送當下手動填的數字，
+  // 填完就凍結了，之後基準價再怎麼調整都不會跟著變，導致自動建單價格長期抓到過期的舊數字。
+  const [baselineRows] = await db.query(
+    `SELECT \`key\`, \`value\` FROM settings WHERE \`key\` LIKE 'baseline_price_%'`
+  ) as any
+  const baselinePrice: Record<string, number> = {}
+  for (const row of baselineRows) {
+    baselinePrice[row.key.replace('baseline_price_', '')] = Number(row.value)
+  }
+
   console.log(`[dailyScheduledOrders] 共 ${fixedCustomers.length} 位固定配送客戶待檢查`)
 
   const dueToday = fixedCustomers.filter((c) => {
@@ -111,9 +122,9 @@ export async function runDailyScheduledOrders() {
       continue
     }
 
-    const unitPrice = customer.default_unit_price ?? customer.price_override
+    const unitPrice = customer.price_override ?? baselinePrice[customer.gas_type] ?? customer.default_unit_price
     if (unitPrice === null || unitPrice === undefined) {
-      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 未設定單價(default_unit_price/price_override)，略過，請手動建單`)
+      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 抓不到任何單價依據（特殊單價/基準價/預設單價都沒有），略過，請手動建單`)
       skipped++
       continue
     }

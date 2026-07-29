@@ -133,15 +133,17 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
         gasType: form.gas_type,
       }
       if (showFixedDelivery) {
-        if (deliveryDays.length === 0 || !form.default_order_quantity || !form.default_unit_price) {
-          alert('啟用固定配送時，至少選擇一個配送星期，數量、單價皆為必填')
+        if (deliveryDays.length === 0 || !form.default_order_quantity) {
+          alert('啟用固定配送時，至少選擇一個配送星期，數量為必填')
           setSaving(false)
           return
         }
         data.delivery_cycle = (form.delivery_cycle === 'WEEKLY' || form.delivery_cycle === 'MONTHLY_FIXED') ? form.delivery_cycle : 'WEEKLY'
         data.delivery_day = deliveryDays.join(',')
         data.default_order_quantity = Number(form.default_order_quantity)
-        data.default_unit_price = Number(form.default_unit_price)
+        // 單價非必填：自動建單時會優先用「特殊單價」，沒設定就用目前的基準價，
+        // 這裡只有在你想讓這位固定配送客戶用一個「跟基準價、特殊單價都不同」的價格時才需要填
+        data.default_unit_price = form.default_unit_price ? Number(form.default_unit_price) : null
       } else {
         // 沒有啟用固定配送，強制清空相關欄位，避免殘留舊設定被排程誤判
         data.delivery_cycle = 'ON_CALL'
@@ -410,18 +412,18 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">每桶單價 *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">每桶單價（選填）</label>
                       <input
                         type="number"
                         min="0"
                         className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        placeholder="例：850"
+                        placeholder="留空＝用特殊單價或基準價"
                         value={form.default_unit_price}
                         onChange={e => setForm(prev => ({ ...prev, default_unit_price: e.target.value }))}
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400">系統每天會自動檢查，到了配送日會自動建立草稿訂單（待出貨），出貨前仍可調整數量。</p>
+                  <p className="text-xs text-gray-400">系統每天會自動檢查，到了配送日會自動建立草稿訂單（待出貨），出貨前仍可調整數量。單價會優先用客戶的特殊單價，沒設定就用目前的基準價，這欄可以留空。</p>
                 </div>
               )}
             </div>
