@@ -48,7 +48,8 @@ export async function getPredictions(req: Request, res: Response) {
       const predictedDay = new Date(predictedDate)
       predictedDay.setHours(0, 0, 0, 0)
 
-      // 排除今天已有訂單的客戶
+      // 排除今天已有訂單的客戶（用台北時區的日期字串，避免跟 container 的 UTC 時間對不起來）
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
       const [todayOrders] = await db.query(
         `SELECT id FROM orders WHERE customer_id = ? AND DATE(created_at) = ? AND status != 'CANCELLED'`,
         [customer.id, todayStr]
