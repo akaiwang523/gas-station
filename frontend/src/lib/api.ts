@@ -93,6 +93,7 @@ export const api = {
     request(`/ar/${customerId}/payment`, { method: 'POST', body: JSON.stringify(data) }),
   getTodayReport: () => request('/reports/today'),
   getMonthReport: (month: string) => request(`/reports/month?month=${month}`),
+  getHotspots: (days?: number) => request(`/reports/hotspots${days ? `?days=${days}` : ''}`),
   getStatement: (customerId: number, month?: string) =>
     request(`/ar/${customerId}/statement${month ? `?month=${month}` : ''}`),
   updateOrder: (id: number, data: { items: { id?: number; gasType: string; quantity: number; unitPrice: number }[]; note?: string; paymentType?: string }) =>

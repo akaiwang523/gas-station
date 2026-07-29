@@ -33,6 +33,9 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
   const [monthData, setMonthData] = useState<any>(null)
   const [selectedMonth, setSelectedMonth] = useState(getMonthOptions()[0].value)
   const [loading, setLoading] = useState(false)
+  const [hotspots, setHotspots] = useState<any>(null)
+  const [hotspotsLoading, setHotspotsLoading] = useState(false)
+  const [hotspotsDays, setHotspotsDays] = useState(90)
   const monthOptions = getMonthOptions()
   // 訂單查詢頁的編輯功能（品項/備註），邏輯與 OrderList.tsx 的編輯區一致
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null)
@@ -160,7 +163,18 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
   useEffect(() => {
     loadToday()
     loadMonth(selectedMonth)
+    loadHotspots(hotspotsDays)
   }, [])
+
+  async function loadHotspots(days: number) {
+    setHotspotsLoading(true)
+    try {
+      const res = await api.getHotspots(days)
+      setHotspots(res)
+    } finally {
+      setHotspotsLoading(false)
+    }
+  }
 
   async function loadToday() {
     try {
@@ -338,6 +352,70 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
           </button>
         </>
       )}
+
+      {/* 配送熱點分析：星期規律（排班用）+ 行政區熱區（依訂單量） */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="text-sm font-medium text-gray-700">📍 配送熱點分析</div>
+          <div className="flex gap-1">
+            {[30, 90, 180].map(d => (
+              <button
+                key={d}
+                onClick={() => { setHotspotsDays(d); loadHotspots(d) }}
+                className={`px-2 py-1 rounded-lg text-xs font-medium transition ${hotspotsDays === d ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+              >近{d}天</button>
+            ))}
+          </div>
+        </div>
+
+        {hotspotsLoading && <div className="text-center text-gray-400 py-4 text-sm">載入中...</div>}
+
+        {!hotspotsLoading && hotspots && (
+          <>
+            <div>
+              <div className="text-xs text-gray-500 font-medium mb-2">星期規律（平均每天訂單量，排兼職班表參考）</div>
+              <div className="flex items-end gap-1.5 h-28">
+                {hotspots.weekdayPattern.map((w: any) => {
+                  const max = Math.max(...hotspots.weekdayPattern.map((x: any) => x.avgOrders), 1)
+                  const heightPct = Math.max((w.avgOrders / max) * 100, 4)
+                  return (
+                    <div key={w.weekday} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
+                      <div className="text-xs font-bold text-gray-700">{w.avgOrders}</div>
+                      <div
+                        className="w-full bg-orange-400 rounded-t-md transition-all"
+                        style={{ height: `${heightPct}%` }}
+                      />
+                      <div className="text-xs text-gray-500">{w.label}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="text-xs text-gray-400 mt-2">數字是「平均訂單量」，不是「營業額」——排班抓訂單量最高的那幾天優先加人</div>
+            </div>
+
+            {hotspots.districtHotspots?.length > 0 && (
+              <div>
+                <div className="text-xs text-gray-500 font-medium mb-2">行政區熱區（依配送訂單量排序）</div>
+                <div className="space-y-1.5">
+                  {hotspots.districtHotspots.map((d: any, i: number) => {
+                    const maxCyl = Math.max(...hotspots.districtHotspots.map((x: any) => Number(x.cylinders || 0)), 1)
+                    const widthPct = Math.max((Number(d.cylinders || 0) / maxCyl) * 100, 4)
+                    return (
+                      <div key={d.district} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 w-16 flex-shrink-0 truncate">{i === 0 ? '🔥 ' : ''}{d.district}</span>
+                        <div className="flex-1 bg-gray-100 rounded-full h-4 relative overflow-hidden">
+                          <div className="bg-blue-400 h-full rounded-full" style={{ width: `${widthPct}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-600 w-20 flex-shrink-0 text-right">{d.order_count}單 · {d.cylinders}桶</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
       </>}
 
       {/* 訂單查詢 */}
