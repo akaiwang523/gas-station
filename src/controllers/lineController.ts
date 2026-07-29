@@ -198,7 +198,8 @@ export async function handleLineWebhook(req: Request, res: Response) {
         continue
       }
 
-      // 預設回主選單
+      // 自由打字問問題（不是照按鈕點選單，也不在任何進行中的流程步驟裡）：
+      // 不再硬塞主選單回去，只回覆已收到、需要立即協助可以打電話，避免讓客戶覺得系統在已讀不回
       const [binding] = await db.query(
         `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
       ) as any
@@ -206,7 +207,10 @@ export async function handleLineWebhook(req: Request, res: Response) {
         userState[userId] = { step: 'waiting_phone' }
         await replyMessage(replyToken, [{ type: 'text', text: '歡迎使用瓦斯訂購服務！\n請先輸入您的電話號碼進行綁定：' }])
       } else {
-        await replyMessage(replyToken, [mainMenu()])
+        await replyMessage(replyToken, [{
+          type: 'text',
+          text: '已收到您的訊息 🙏\n若是要訂購瓦斯，可以點選單裡的「🛒 我要叫瓦斯」；若需要立即協助，歡迎直接來電：\n06-2231668 / 06-2264569'
+        }])
       }
     }
 
