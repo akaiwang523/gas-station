@@ -523,7 +523,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   {p.overdueDays > 0 && (
                     <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
                   )}
-                  <div className="text-xs text-gray-500">平均間隔：{p.avgInterval} 天</div>
+                  <div className="text-xs text-gray-500">上次叫 {p.lastQuantity} 桶，預估可撐 {p.estimatedDaysPerBatch} 天</div>
+                  <div className="text-xs text-gray-400">平均用量：每天約 {p.avgDailyUsage} 桶</div>
                   <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
                   <a
                     href={`tel:${p.customerPhone}`}

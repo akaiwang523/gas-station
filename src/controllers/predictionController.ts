@@ -23,12 +23,15 @@ export async function getPredictions(req: Request, res: Response) {
     const predictions = []
 
     for (const customer of customers) {
-      // 取最近 4 筆訂單日期與品項
+      // 取最近 4 筆訂單，每筆訂單的桶數用 SUM 加總（一張訂單不管有幾種規格，都算成同一筆、
+      // 用掉的總桶數是所有品項加起來，不能用原本的 LEFT JOIN 沒有 GROUP BY 直接抓，
+      // 不然一張多品項的訂單會被拆成好幾列，誤判成好幾筆訂單，桶數也只會算到其中一個品項）
       const [orders] = await db.query(
-        `SELECT o.id, o.created_at, oi.gas_type, oi.quantity, oi.unit_price
+        `SELECT o.id, o.created_at, COALESCE(SUM(oi.quantity), o.quantity) as total_quantity
          FROM orders o
          LEFT JOIN order_items oi ON oi.order_id = o.id
          WHERE o.customer_id = ? AND o.status != 'CANCELLED'
+         GROUP BY o.id
          ORDER BY o.created_at DESC
          LIMIT 4`,
         [customer.id]
@@ -40,17 +43,26 @@ export async function getPredictions(req: Request, res: Response) {
       const lastOrderTime = new Date(orders[0].created_at).getTime()
       if (dismissedAt[customer.id] && dismissedAt[customer.id] >= lastOrderTime) continue
 
-      // 計算 3 個間隔天數的平均
-      const dates = orders.map((o: any) => new Date(o.created_at).getTime())
-      const intervals = []
-      for (let i = 0; i < dates.length - 1; i++) {
-        intervals.push((dates[i] - dates[i + 1]) / (1000 * 60 * 60 * 24))
+      // 用「量」不是「次數」去算：這次叫得多，理論上要撐比較久才會再打來，
+      // 不能像以前那樣不管每次叫幾桶，通通當成同一次「訂購」去算平均間隔——
+      // 改成先算這位客戶平均一天大概用掉幾桶（每個區間的桶數 ÷ 那段區間的天數，取平均），
+      // 再用「上次實際叫了幾桶」反推這批貨大概能撐幾天，藉此推算下次配送日
+      const chronological = [...orders].reverse() as any[] // 轉成舊到新，方便算區間
+      const dailyRates: number[] = []
+      for (let i = 0; i < chronological.length - 1; i++) {
+        const days = (new Date(chronological[i + 1].created_at).getTime() - new Date(chronological[i].created_at).getTime()) / (1000 * 60 * 60 * 24)
+        const qty = Number(chronological[i].total_quantity) || 1
+        if (days > 0) dailyRates.push(qty / days)
       }
-      const avgInterval = intervals.reduce((a: number, b: number) => a + b, 0) / intervals.length
+      if (dailyRates.length === 0) continue
+      const avgDailyUsage = dailyRates.reduce((a, b) => a + b, 0) / dailyRates.length // 桶/天
 
-      // 預測耗盡日
-      const lastOrderDate = new Date(orders[0].created_at)
-      const predictedDate = new Date(lastOrderDate.getTime() + avgInterval * 24 * 60 * 60 * 1000)
+      const lastOrder = orders[0]
+      const lastQuantity = Number(lastOrder.total_quantity) || 1
+      const daysThisBatchLasts = avgDailyUsage > 0 ? lastQuantity / avgDailyUsage : 9999
+
+      const lastOrderDate = new Date(lastOrder.created_at)
+      const predictedDate = new Date(lastOrderDate.getTime() + daysThisBatchLasts * 24 * 60 * 60 * 1000)
 
       // 上限：明天以內才提前顯示（不用太早打擾客戶）；沒有下限——
       // 預測日期一旦到了，就會持續出現在清單裡，直到真的幫他建單為止，
@@ -71,16 +83,22 @@ export async function getPredictions(req: Request, res: Response) {
 
       if (predictedDay <= tomorrow) {
         const overdueDays = Math.round((today.getTime() - predictedDay.getTime()) / (1000 * 60 * 60 * 24))
+        // 上次訂單的品項明細（用來顯示「上次訂 20kg×2」這種資訊），跟總桶數分開撈
+        const [lastItems] = await db.query(
+          `SELECT gas_type, quantity, unit_price FROM order_items WHERE order_id = ?`,
+          [lastOrder.id]
+        ) as any
         predictions.push({
           customerId: customer.id,
           customerName: customer.name,
           customerPhone: customer.phone,
           predictedDate: predictedDate.toISOString().slice(0, 10),
           overdueDays,
-          avgInterval: Math.round(avgInterval),
-          lastGasType: orders[0].gas_type,
-          lastQuantity: orders[0].quantity,
-          lastUnitPrice: orders[0].unit_price,
+          avgDailyUsage: Math.round(avgDailyUsage * 100) / 100,
+          estimatedDaysPerBatch: Math.round(daysThisBatchLasts),
+          lastQuantity,
+          lastGasType: lastItems[0]?.gas_type,
+          lastUnitPrice: lastItems[0]?.unit_price,
         })
       }
     }
