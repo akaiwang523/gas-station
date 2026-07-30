@@ -575,8 +575,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             <div key={order.id} className={`bg-white border border-gray-200 border-l-4 ${STATUS_BORDER[order.status]} rounded-xl p-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
               {/* 卡片主體 - 點擊展開（多選模式下改成點擊勾選） */}
               <div className="cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="flex justify-between items-start mb-1">
-                  <div className="flex items-start gap-2">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="flex items-start gap-2 min-w-0">
                     {selectMode && (
                       <input
                         type="checkbox"
@@ -586,70 +586,78 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         className="w-5 h-5 mt-0.5 accent-orange-500 flex-shrink-0"
                       />
                     )}
-                    <div>
-                    <span className="font-bold text-gray-800">{order.customer_name}</span>
-                    <span className="text-sm text-gray-500 ml-2">{order.customer_phone}</span>
-                    {onEditCustomer && (
-                      <button
-                        onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                        className="text-xs text-blue-500 ml-2 align-middle"
-                        title="編輯客戶資料"
-                      >✏️ 客戶</button>
-                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
+                        {onEditCustomer && (
+                          <button
+                            onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                            className="text-xs text-blue-500"
+                            title="編輯客戶資料"
+                          >✏️</button>
+                        )}
+                      </div>
+                      <a
+                        href={mapsUrl(order.customer_address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1 text-sm text-gray-600 hover:text-blue-600 mt-0.5"
+                      >
+                        <span>📍</span>
+                        <span className="truncate">{order.customer_address}</span>
+                      </a>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     {order.scheduled_date && (
-                      <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-100 text-purple-700">
+                      <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-100 text-purple-700 whitespace-nowrap">
                         📅 {new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
                       </span>
                     )}
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
-                    <span className="text-gray-300 text-xs border-l border-gray-200 pl-2">{expandedId === order.id ? '收合 ▲' : '詳情 ▼'}</span>
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
                   </div>
                 </div>
-                {order.call_time && (
-                  <div className="text-xs text-gray-400 mb-1.5">📞 來電 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>
-                )}
-                {lastDelivery && (
-                  <div className="text-xs text-gray-400 mb-1.5">🕓 上次配送 {daysAgoLabel(lastDelivery.created_at)}</div>
-                )}
-                <a
-                  href={mapsUrl(order.customer_address)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  className="flex items-center gap-1.5 text-sm text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg px-2.5 py-2 mb-2 transition"
-                >
-                  <span>📍</span>
-                  <span className="flex-1">{order.customer_address}</span>
-                  <span className="text-blue-500 text-xs whitespace-nowrap">導航 ›</span>
-                </a>
-                <div className="flex justify-between items-center mb-1">
-                  <div className="text-lg font-bold text-gray-800">
+
+                {/* 重點區塊：品項/桶數 + 金額/付款方式，用色塊圈起來、字放大，這是司機真正要看的東西 */}
+                <div className="flex justify-between items-center bg-gray-50 rounded-xl px-3 py-2.5 my-2.5">
+                  <div className="text-xl font-bold text-gray-800">
                     {order.items && order.items.length > 0 ? (
                       <span>{order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
                     ) : (
                       <span>{order.quantity} 桶</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium text-gray-600">${Number(order.total_amount).toLocaleString()}</span>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-xl font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
                       {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
                     </span>
                   </div>
                 </div>
-                {order.note && <div className="text-sm text-orange-600 mb-1">📝 {order.note}</div>}
-                {returnsMap[order.customer_id]?.[0] && (
-                  <div className="text-xs text-gray-400 mb-1">
-                    *上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg
-                    {Number(returnsMap[order.customer_id][0].amount) > 0
-                      ? `（${returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} $${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}）`
-                      : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''
-                    }
+
+                {/* 次要資訊：來電時間、上次配送、備註、存氣，縮小集中放這裡，需要時看得到、平常不搶注意力 */}
+                {(order.call_time || lastDelivery || order.note || returnsMap[order.customer_id]?.[0]) && (
+                  <div className="text-xs text-gray-400 space-y-0.5">
+                    {(order.call_time || lastDelivery) && (
+                      <div className="flex gap-2 flex-wrap">
+                        {order.call_time && <span>📞 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>}
+                        {lastDelivery && <span>🕓 上次配送 {daysAgoLabel(lastDelivery.created_at)}</span>}
+                      </div>
+                    )}
+                    {order.note && <div className="text-orange-500">📝 {order.note}</div>}
+                    {returnsMap[order.customer_id]?.[0] && (
+                      <div>
+                        *上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg
+                        {Number(returnsMap[order.customer_id][0].amount) > 0
+                          ? `（${returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} $${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}）`
+                          : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''
+                        }
+                      </div>
+                    )}
                   </div>
                 )}
+                <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
               </div>
               {/* 展開區塊 */}
               {expandedId === order.id && (
