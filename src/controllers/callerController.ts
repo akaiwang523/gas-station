@@ -8,6 +8,18 @@ function normalizePhone(raw: string): string {
   return p
 }
 
+// 共用單價邏輯：優先用客戶的特殊單價，沒有就用目前的基準價，都沒有才退回 800——
+// 來電相關的三個建單流程（已知客戶再次來電 / 陌生來電綁定既有客戶 / 陌生來電直接指定客戶）
+// 都要用同一套邏輯，之前只有其中一個地方跟上了基準價，另外兩個還停在寫死 800，
+// 導致「陌生來電綁定既有客戶」這種情境的第一張單抓不到正確的基準價
+async function getUnitPriceForCustomer(gasType: string, priceOverride: number | null): Promise<number> {
+  if (priceOverride) return priceOverride
+  const [rows] = await db.query(
+    `SELECT \`value\` FROM settings WHERE \`key\` = ?`, [`baseline_price_${gasType}`]
+  ) as any
+  return rows[0] ? Number(rows[0].value) : 800
+}
+
 export async function lookupCaller(req: Request, res: Response) {
   const { phone, apiKey } = req.body
   if (apiKey !== process.env.CALLER_API_KEY) return res.status(401).json({ error: 'Unauthorized' })
@@ -412,10 +424,11 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
     [normalized]
   )
 
-  // 沿用 incomingCallById 的建草稿單邏輯
+  // 同一客戶「今天」若還有一筆尚未送達的單，直接沿用，不重複建立（跟主流程一致）
+  const todayStr1 = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
-    [customerId]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
+    [customerId, todayStr1]
   ) as any
 
   if (existingDrafts[0]) {
@@ -424,7 +437,7 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
 
   const gasType = c.gas_type || 'BOTTLED_20KG'
   const quantity = 1
-  const unitPrice = c.price_override || 800
+  const unitPrice = await getUnitPriceForCustomer(gasType, c.price_override)
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
@@ -471,10 +484,11 @@ export async function incomingCallById(req: Request, res: Response) {
 
   const c = rows[0]
 
-  // 同一客戶若已經有未處理的草稿單，直接沿用，不重複建立
+  // 同一客戶「今天」若還有一筆尚未送達的單，直接沿用，不重複建立（跟主流程一致）
+  const todayStr2 = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY created_at DESC LIMIT 1`,
-    [c.id]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
+    [c.id, todayStr2]
   ) as any
 
   if (existingDrafts[0]) {
@@ -483,7 +497,7 @@ export async function incomingCallById(req: Request, res: Response) {
 
   const gasType = c.gas_type || 'BOTTLED_20KG'
   const quantity = 1
-  const unitPrice = c.price_override || 800
+  const unitPrice = await getUnitPriceForCustomer(gasType, c.price_override)
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
