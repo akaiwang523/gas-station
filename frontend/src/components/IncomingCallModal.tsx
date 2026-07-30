@@ -49,6 +49,7 @@ export default function IncomingCallModal() {
   // 而且會直接帶入上一單的所有品項，正常情況只要確認、有誤再改就好，不用整個重選
   const [editItems, setEditItems] = useState<EditItem[]>([{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: FALLBACK_PRICE.BOTTLED_20KG }])
   const [scheduledDate, setScheduledDate] = useState('')
+  const [rememberPrice, setRememberPrice] = useState(false)
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -97,6 +98,7 @@ export default function IncomingCallModal() {
               : [{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: baselinePrices.BOTTLED_20KG }]
           )
           setScheduledDate('')
+          setRememberPrice(false)
           setVisible(true)
         }
       } else if (data.unknownPhone) {
@@ -143,9 +145,14 @@ export default function IncomingCallModal() {
         },
         body: JSON.stringify({ paymentType, items: editItems, scheduledDate })
       })
+      // 「記住這個單價」：只在單一規格時出現這個選項（避免多規格客戶被單一數字誤蓋掉）
+      if (rememberPrice && editItems.length === 1) {
+        try { await api.updateCustomer(draft.customer.id, { price_override: editItems[0].unitPrice }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+      }
       setVisible(false)
       setDraft(null)
       shownDraftId.current = null
+      setRememberPrice(false)
       window.dispatchEvent(new Event('order-refresh'))
       // 立刻檢查有沒有下一筆排隊中的草稿，不用等下一次輪詢
       poll()
@@ -481,6 +488,17 @@ export default function IncomingCallModal() {
             <button onClick={addEditItem} className="mt-2 w-full border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-2 text-sm font-medium">
               + 新增品項
             </button>
+            {editItems.length === 1 && (
+              <label className="flex items-center gap-2 text-sm text-gray-600 mt-2">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-orange-500"
+                  checked={rememberPrice}
+                  onChange={e => setRememberPrice(e.target.checked)}
+                />
+                🔒 記住這個單價（存成 {draft.customer.name} 的特殊單價，以後自動帶入）
+              </label>
+            )}
             <div className="flex justify-between items-center pt-3 font-bold text-orange-500 text-lg">
               <span>合計</span>
               <span>${editItems.reduce((s, it) => s + it.quantity * it.unitPrice, 0).toLocaleString()}</span>

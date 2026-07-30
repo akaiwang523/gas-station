@@ -58,6 +58,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [stairFee, setStairFee] = useState(0)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [scheduledDate, setScheduledDate] = useState('')
+  const [rememberPrice, setRememberPrice] = useState(false)
   const [callTime, setCallTime] = useState('')
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
@@ -105,6 +106,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setIsNew(false)
     setSearch(c.name)
     setResults([])
+    setRememberPrice(false)
     if (Number(c.amount_owed) > 0) setPaymentType('AR')
     else setPaymentType('CASH')
 
@@ -181,6 +183,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setLastOrderHint('')
     setPendingReturns([])
     setScheduledDate('')
+    setRememberPrice(false)
   }
 
   async function handleSubmit() {
@@ -209,6 +212,12 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
 
       const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
       await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote, scheduledDate, callTime })
+
+      // 「記住這個價格」：只在單一規格時才會出現這個選項（避免多規格客戶被單一數字誤蓋掉），
+      // 勾選的話，建單同時把這次的單價存成客戶的特殊單價，之後就會自動帶入，不用再跑一趟客戶頁面改
+      if (rememberPrice && items.length === 1) {
+        try { await api.updateCustomer(customerId, { price_override: items[0].unit_price }) } catch { /* 訂單已經建立成功，這步失敗就算了，不影響本次接單 */ }
+      }
 
       const name = isNew ? newName : selected!.name
       const totalQty = items.reduce((s, i) => s + i.quantity, 0)
@@ -344,6 +353,18 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           + 新增品項
         </button>
       </div>
+
+      {!isNew && selected && items.length === 1 && (
+        <label className="flex items-center gap-2 text-sm text-gray-600 -mt-2">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-orange-500"
+            checked={rememberPrice}
+            onChange={e => setRememberPrice(e.target.checked)}
+          />
+          🔒 記住這個單價（存成 {selected.name} 的特殊單價，以後自動帶入）
+        </label>
+      )}
 
       {/* 樓梯費 */}
       <div className="flex items-center gap-3">
