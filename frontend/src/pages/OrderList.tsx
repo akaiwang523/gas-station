@@ -83,6 +83,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [editItems, setEditItems] = useState<{ id: number; gasType: string; quantity: string; unitPrice: string }[]>([])
   const [editNote, setEditNote] = useState('')
   const [editPaymentType, setEditPaymentType] = useState('CASH')
+  const [editRememberPrice, setEditRememberPrice] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
   // 待送分頁多選批次標記完成（處理「其實已經送完但忘記點完成」累積下來的舊單）
@@ -156,6 +157,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     }
     setEditNote(order.note || '')
     setEditPaymentType(order.payment_type)
+    setEditRememberPrice(false)
     // 若 load() 階段還沒撈到（例如已完成訂單），補撈一次
     if (!customerHistory[order.customer_id]) {
       try {
@@ -176,6 +178,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         id: i.id || undefined, gasType: i.gasType, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
       }))
       await api.updateOrder(order.id, { items, note: editNote, paymentType: editPaymentType })
+      if (editRememberPrice && editItems.length === 1) {
+        try { await api.updateCustomer(order.customer_id, { price_override: Number(editItems[0].unitPrice) || 0 }) } catch { /* 訂單已經存好了，這步失敗不影響本次修改 */ }
+      }
       setExpandedId(null)
       await load()
     } catch (e: any) {
@@ -709,6 +714,17 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">合計：${editItemsTotal().toLocaleString()}</label>
                   </div>
+                  {editItems.length === 1 && (
+                    <label className="flex items-center gap-2 text-xs text-gray-600" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-orange-500"
+                        checked={editRememberPrice}
+                        onChange={e => setEditRememberPrice(e.target.checked)}
+                      />
+                      🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
+                    </label>
+                  )}
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">備註</label>
                     <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
