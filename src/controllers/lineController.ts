@@ -217,7 +217,19 @@ export async function handleLineWebhook(req: Request, res: Response) {
       }
 
       // 自由打字問問題（不是照按鈕點選單，也不在任何進行中的流程步驟裡）：
-      // 不做任何回覆——保留空白，不主動回應，避免干擾客戶
+      // 不回覆客戶（避免干擾），但存起來讓工作人員在網站上看得到——
+      // 有些客戶傳訊息不是要叫瓦斯，是問其他業務相關的事，完全不回覆又不留紀錄的話會漏接
+      try {
+        const [binding] = await db.query(
+          `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
+        ) as any
+        await db.query(
+          `INSERT INTO line_inquiries (line_user_id, customer_id, message) VALUES (?, ?, ?)`,
+          [userId, binding[0]?.customer_id || null, text]
+        )
+      } catch (err) {
+        console.error('[line_inquiries insert]', err)
+      }
       continue
     }
 
@@ -429,4 +441,33 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
   } finally {
     conn.release()
   }
+}
+
+// GET /api/line/inquiries?status=PENDING — 客戶自由打字、不是照選單點選的訊息清單
+export async function listLineInquiries(req: Request, res: Response) {
+  const { status } = req.query
+  const conditions: string[] = []
+  const params: any[] = []
+  if (status) { conditions.push('li.status = ?'); params.push(status) }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
+
+  const [rows] = await db.query(
+    `SELECT li.id, li.line_user_id, li.customer_id, li.message, li.status, li.created_at,
+            c.name as customer_name, c.phone as customer_phone
+     FROM line_inquiries li
+     LEFT JOIN customers c ON c.id = li.customer_id
+     ${where}
+     ORDER BY li.created_at DESC
+     LIMIT 100`,
+    params
+  ) as any
+  res.json({ inquiries: rows })
+}
+
+// PATCH /api/line/inquiries/:id/handle — 標記這則訊息已經處理過了
+export async function handleLineInquiry(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  if (!id) return res.status(400).json({ error: '缺少編號' })
+  await db.query(`UPDATE line_inquiries SET status = 'HANDLED' WHERE id = ?`, [id])
+  res.json({ ok: true })
 }

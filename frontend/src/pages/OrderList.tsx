@@ -70,6 +70,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [notifiedIds, setNotifiedIds] = useState<Set<number>>(new Set())
   const [notifyingId, setNotifyingId] = useState<number | null>(null)
   const [predExpanded, setPredExpanded] = useState(false)
+  const [lineInquiries, setLineInquiries] = useState<any[]>([])
+  const [inquiriesExpanded, setInquiriesExpanded] = useState(false)
+  const [inquiryActionId, setInquiryActionId] = useState<number | null>(null)
   const [drafts, setDrafts] = useState<Order[]>([])
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
   const [draftItems, setDraftItems] = useState<{ gasType: string; quantity: string; unitPrice: string }[]>([{ gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: '800' }])
@@ -130,6 +133,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
       try {
         const pred = await api.getPredictions()
         setPredictions(pred.predictions || [])
+      } catch {}
+      try {
+        const inq = await api.getLineInquiries('PENDING')
+        setLineInquiries(inq.inquiries || [])
       } catch {}
       try {
         const draftRes = await api.getOrders({ status: 'DRAFT' })
@@ -558,6 +565,46 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
                     >📞 撥打電話</a>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {lineInquiries.length > 0 && (
+        <div className="bg-purple-50 rounded-xl p-3">
+          <button
+            className="w-full flex items-center justify-between"
+            onClick={() => setInquiriesExpanded(prev => !prev)}
+          >
+            <div className="text-sm font-bold text-purple-800">💬 LINE 詢問（不是叫瓦斯）<span className="ml-2 bg-purple-200 text-purple-800 text-xs px-2 py-0.5 rounded-full">{lineInquiries.length}</span></div>
+            <span className="text-purple-400 text-xs">{inquiriesExpanded ? '▲ 收合' : '▼ 展開'}</span>
+          </button>
+          {inquiriesExpanded && (
+            <div className="space-y-2 mt-2">
+              {lineInquiries.map(inq => (
+                <div key={inq.id} className="bg-white rounded-lg p-2.5 border border-purple-100">
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs text-gray-500">
+                        {inq.customer_name ? `${inq.customer_name}（${inq.customer_phone}）` : '尚未綁定客戶'}
+                        <span className="text-gray-300 ml-2">{new Date(inq.created_at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
+                      </div>
+                      <div className="text-sm text-gray-800 mt-1 break-words">{inq.message}</div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        setInquiryActionId(inq.id)
+                        try {
+                          await api.handleLineInquiry(inq.id)
+                          setLineInquiries(prev => prev.filter(x => x.id !== inq.id))
+                        } catch { /* 失敗就算了，重新整理還是看得到 */ }
+                        finally { setInquiryActionId(null) }
+                      }}
+                      disabled={inquiryActionId === inq.id}
+                      className="text-xs text-purple-500 hover:text-purple-700 flex-shrink-0"
+                    >✓ 已處理</button>
+                  </div>
                 </div>
               ))}
             </div>
