@@ -71,6 +71,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [drafts, setDrafts] = useState<Order[]>([])
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
   const [draftItems, setDraftItems] = useState<{ gasType: string; quantity: string; unitPrice: string }[]>([{ gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: '800' }])
+  const [draftRememberPrice, setDraftRememberPrice] = useState(false)
   const [draftPaymentType, setDraftPaymentType] = useState('CASH')
   const [draftScheduledDate, setDraftScheduledDate] = useState('')
   const [draftConfirmLoading, setDraftConfirmLoading] = useState(false)
@@ -299,6 +300,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     )
     setDraftPaymentType(d.payment_type || 'CASH')
     setDraftScheduledDate('')
+    setDraftRememberPrice(false)
   }
   function updateDraftItem(idx: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
     setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
@@ -315,7 +317,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   function closeDraftConfirm() {
     setDraftEditId(null)
   }
-  async function submitDraftConfirm(id: number) {
+  async function submitDraftConfirm(id: number, customerId: number) {
     setDraftConfirmLoading(true)
     try {
       await api.confirmDraft(id, {
@@ -323,6 +325,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         items: draftItems.map(i => ({ gasType: i.gasType, quantity: Number(i.quantity) || 1, unitPrice: Number(i.unitPrice) || 0 })),
         scheduledDate: draftScheduledDate,
       })
+      if (draftRememberPrice && draftItems.length === 1) {
+        try { await api.updateCustomer(customerId, { price_override: Number(draftItems[0].unitPrice) || 0 }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+      }
       setDraftEditId(null)
       setDrafts(prev => prev.filter(x => x.id !== id))
       await load()
@@ -388,7 +393,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         try {
                           await api.cancelDraft(d.id)
                           setDrafts(prev => prev.filter(x => x.id !== d.id))
-                        } catch { alert('刪除失敗') }
+                        } catch (e: any) { alert(`刪除失敗：${e.message || '未知錯誤'}`) }
                       }}
                     >🗑</button>
                   </div>
@@ -438,6 +443,17 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       </button>
                     </div>
                     <div className="text-xs text-gray-500">合計：${draftItemsTotal().toLocaleString()}</div>
+                    {draftItems.length === 1 && (
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-orange-500"
+                          checked={draftRememberPrice}
+                          onChange={e => setDraftRememberPrice(e.target.checked)}
+                        />
+                        🔒 記住這個單價（存成 {d.customer_name} 的特殊單價，以後自動帶入）
+                      </label>
+                    )}
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">付款方式</label>
                       <div className="flex gap-2">
@@ -463,7 +479,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       )}
                     </div>
                     <button
-                      onClick={() => submitDraftConfirm(d.id)}
+                      onClick={() => submitDraftConfirm(d.id, d.customer_id)}
                       disabled={draftConfirmLoading}
                       className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition"
                     >
