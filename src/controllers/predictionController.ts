@@ -46,7 +46,7 @@ export async function getPredictions(req: Request, res: Response) {
 
       // 用「量」不是「次數」去算：這次叫得多，理論上要撐比較久才會再打來，
       // 不能像以前那樣不管每次叫幾桶，通通當成同一次「訂購」去算平均間隔——
-      // 改成先算這位客戶平均一天大概用掉幾桶（每個區間的桶數 ÷ 那段區間的天數，取平均），
+      // 改成先算這位客戶平均一天大概用掉幾桶（每個區間的桶數 ÷ 那段區間的天數），
       // 再用「上次實際叫了幾桶」反推這批貨大概能撐幾天，藉此推算下次配送日
       const chronological = [...orders].reverse() as any[] // 轉成舊到新，方便算區間
       const dailyRates: number[] = []
@@ -56,7 +56,20 @@ export async function getPredictions(req: Request, res: Response) {
         if (days > 0) dailyRates.push(qty / days)
       }
       if (dailyRates.length === 0) continue
-      const avgDailyUsage = dailyRates.reduce((a, b) => a + b, 0) / dailyRates.length // 桶/天
+
+      // 用中位數而不是平均數：系統剛上線、資料還不多，每位客戶通常只有 2-3 段區間可以算，
+      // 只要其中一段剛好是異常值（例如那次是進貨囤貨、不是正常消耗），平均數會被單一異常值整個拉走，
+      // 中位數對這種離群值比較不敏感，樣本數越少的時候這個差異影響越大
+      const sortedRates = [...dailyRates].sort((a, b) => a - b)
+      const mid = Math.floor(sortedRates.length / 2)
+      const avgDailyUsage = sortedRates.length % 2 !== 0
+        ? sortedRates[mid]
+        : (sortedRates[mid - 1] + sortedRates[mid]) / 2
+
+      // 信心標示：樣本數（區間數）太少時，明確標示「僅供參考」，避免把還在累積資料階段的
+      // 猜測當成準確預測——系統剛上線，大部分客戶現階段都只會落在「僅供參考」，這是預期中的事，
+      // 之後資料累積夠了會自動轉為一般信心
+      const confidence = dailyRates.length >= 3 ? 'normal' : 'low'
 
       const lastOrder = orders[0]
       const lastQuantity = Number(lastOrder.total_quantity) || 1
@@ -100,6 +113,8 @@ export async function getPredictions(req: Request, res: Response) {
           lastQuantity,
           lastGasType: lastItems[0]?.gas_type,
           lastUnitPrice: lastItems[0]?.unit_price,
+          confidence,
+          sampleSize: dailyRates.length,
         })
       }
     }

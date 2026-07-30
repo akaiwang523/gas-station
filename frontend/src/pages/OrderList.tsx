@@ -518,7 +518,12 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     className="absolute top-1.5 right-1.5 text-gray-300 hover:text-gray-500 text-sm w-5 h-5 flex items-center justify-center"
                     title="取消這一輪提醒（下次他有新訂單才會重新提醒）"
                   >✕</button>
-                  <div className="font-bold text-gray-800 text-sm truncate pr-4">{p.customerName}</div>
+                  <div className="flex items-center gap-1 pr-4">
+                    <span className="font-bold text-gray-800 text-sm truncate">{p.customerName}</span>
+                    {p.confidence === 'low' && (
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0" title="資料還不夠多，準確度僅供參考">僅供參考</span>
+                    )}
+                  </div>
                   <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
                   {p.overdueDays > 0 && (
                     <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
