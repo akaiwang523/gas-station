@@ -793,12 +793,12 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           <div className="text-sm font-medium text-gray-400">已完成</div>
           {done.map(order => (
             <div key={order.id} className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-              <div className="flex justify-between items-start">
+              <div className="flex justify-between items-start cursor-pointer" onClick={() => toggleExpand(order)}>
                 <div>
                   <span className="font-medium text-gray-600">{order.customer_name}</span>
                   {onEditCustomer && (
                     <button
-                      onClick={() => onEditCustomer(order.customer_id)}
+                      onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
                       className="text-xs text-blue-500 ml-2 align-middle"
                       title="編輯客戶資料"
                     >✏️ 客戶</button>
@@ -812,16 +812,96 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 </div>
                 <div className="text-right">
                   <div className="text-sm text-gray-500">${Number(order.total_amount).toLocaleString()}</div>
-                  {order.status === 'DELIVERED' && (
-                    <button onClick={() => undoDelivered(order.id)} disabled={actionId === order.id} className="text-xs text-orange-400 hover:text-orange-600 mt-1 transition block">
-                      ↩ 撤銷
-                    </button>
-                  )}
-                  <button onClick={() => deleteOrder(order.id)} disabled={actionId === order.id} className="text-xs text-red-400 hover:text-red-600 mt-1 transition block">
-                    🗑 刪除
-                  </button>
+                  <div className="text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '編輯 ▾'}</div>
                 </div>
               </div>
+              {expandedId === order.id && (
+                <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                  <div className="space-y-2">
+                    {editItems.map((item, idx) => (
+                      <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                        <select
+                          className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                          value={item.gasType}
+                          onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                        >
+                          {Object.entries(GAS_LABELS).map(([val, label]) => (
+                            <option key={val} value={val}>{label}</option>
+                          ))}
+                        </select>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
+                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 mb-0.5">單價</label>
+                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                        </div>
+                        <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
+                          ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                        </div>
+                        <button
+                          onClick={() => removeEditItem(idx)}
+                          disabled={editItems.length <= 1}
+                          className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
+                          title="刪除此品項"
+                        >✕</button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={addEditItem}
+                      className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
+                    >＋ 新增品項（不同規格）</button>
+                  </div>
+                  <div className="text-xs text-gray-500">合計：${editItemsTotal().toLocaleString()}</div>
+                  {editItems.length === 1 && (
+                    <label className="flex items-center gap-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-orange-500"
+                        checked={editRememberPrice}
+                        onChange={e => setEditRememberPrice(e.target.checked)}
+                      />
+                      🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
+                    </label>
+                  )}
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">備註</label>
+                    <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      value={editNote} onChange={e => setEditNote(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">付款方式</label>
+                    <div className="flex gap-2">
+                      {[['CASH', '💵 現金'], ['AR', '📒 欠帳']].map(([val, label]) => (
+                        <button
+                          key={val}
+                          onClick={() => setEditPaymentType(val)}
+                          className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editPaymentType === val ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                        >{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <button onClick={() => saveEdit(order)} disabled={editLoading}
+                    className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
+                    {editLoading ? '儲存中...' : '💾 儲存修改'}
+                  </button>
+                  <div className="flex gap-2">
+                    {order.status === 'DELIVERED' && (
+                      <button onClick={() => undoDelivered(order.id)} disabled={actionId === order.id}
+                        className="flex-1 bg-gray-100 hover:bg-orange-100 text-gray-500 hover:text-orange-600 text-xs font-medium py-2 rounded-lg transition">
+                        ↩ 撤銷
+                      </button>
+                    )}
+                    <button onClick={() => deleteOrder(order.id)} disabled={actionId === order.id}
+                      className="flex-1 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-600 text-xs font-medium py-2 rounded-lg transition">
+                      🗑 刪除
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
