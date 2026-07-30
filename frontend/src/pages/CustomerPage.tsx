@@ -9,6 +9,7 @@ type Customer = {
   address: string
   district: string | null
   gas_type: string
+  customer_type: string | null
   price_override: number | null
   note: string | null
   status: string
@@ -19,6 +20,12 @@ type Customer = {
   delivery_day: string | null
   default_order_quantity: number | null
   default_unit_price: number | null
+}
+
+const CUSTOMER_TYPE_LABEL: Record<string, string> = {
+  COMMERCIAL: '🏪 營業用',
+  RESIDENTIAL: '🏠 一般住家',
+  UNKNOWN: '未分類',
 }
 
 const GAS_TYPE_LABEL: Record<string, string> = {
@@ -47,7 +54,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState({
     name: '', phone: '', phone2: '', address: '', district: '',
-    gas_type: 'BOTTLED_20KG', price_override: '', note: '',
+    gas_type: 'BOTTLED_20KG', customer_type: 'UNKNOWN', price_override: '', note: '',
     delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
   })
   const [deliveryDays, setDeliveryDays] = useState<number[]>([])
@@ -95,7 +102,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
   function openAdd() {
     setForm({
       name: '', phone: '', phone2: '', address: '', district: '',
-      gas_type: 'BOTTLED_20KG', price_override: '', note: '',
+      gas_type: 'BOTTLED_20KG', customer_type: 'UNKNOWN', price_override: '', note: '',
       delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
     })
     setDeliveryDays([])
@@ -108,7 +115,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
     setForm({
       name: c.name, phone: c.phone, phone2: c.phone2 || '',
       address: c.address, district: c.district || '',
-      gas_type: c.gas_type, price_override: c.price_override ? String(c.price_override) : '',
+      gas_type: c.gas_type, customer_type: c.customer_type || 'UNKNOWN', price_override: c.price_override ? String(c.price_override) : '',
       note: c.note || '',
       delivery_cycle: c.delivery_cycle || 'ON_CALL',
       default_order_quantity: c.default_order_quantity ? String(c.default_order_quantity) : '',
@@ -129,6 +136,8 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
     try {
       const data: any = {
         ...form,
+        customer_type: form.customer_type || 'UNKNOWN',
+        customerType: form.customer_type || 'UNKNOWN',
         priceOverride: form.price_override ? Number(form.price_override) : null,
         gasType: form.gas_type,
       }
@@ -264,6 +273,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
               <div className="text-sm text-gray-500">{c.address}</div>
               <div className="flex gap-2 mt-1 text-xs text-gray-400">
                 <span>{GAS_TYPE_LABEL[c.gas_type]}</span>
+                {c.customer_type && <span>{CUSTOMER_TYPE_LABEL[c.customer_type]}</span>}
                 {c.price_override && <span>特殊單價 ${c.price_override}</span>}
                 {c.district && <span>{c.district}</span>}
               </div>
@@ -342,6 +352,19 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
                 <option value="BOTTLED_16KG">16kg桶裝</option>
                 <option value="BOTTLED_4KG">4kg桶裝</option>
                 <option value="PIPED">管道瓦斯</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">客戶類型（用於預測補貨，沒有歷史訂單時的預設值）</label>
+              <select
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                value={form.customer_type}
+                onChange={e => setForm(prev => ({ ...prev, customer_type: e.target.value }))}
+              >
+                <option value="UNKNOWN">未分類</option>
+                <option value="COMMERCIAL">🏪 營業用</option>
+                <option value="RESIDENTIAL">🏠 一般住家</option>
               </select>
             </div>
 

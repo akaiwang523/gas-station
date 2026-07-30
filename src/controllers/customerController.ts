@@ -39,17 +39,17 @@ export async function getCustomer(req: Request, res: Response) {
 export async function createCustomer(req: Request, res: Response) {
   const {
     name, phone, address, district, note, deposit = 0, priceOverride,
-    deliveryCycle = 'ON_CALL', deliveryDay, gasType = 'BOTTLED_20KG', cylindersHeld = 0,
+    deliveryCycle = 'ON_CALL', deliveryDay, gasType = 'BOTTLED_20KG', customerType, cylindersHeld = 0,
     default_order_quantity, default_unit_price,
   } = req.body
   const [result] = await db.query(
     `INSERT INTO customers
       (name, phone, address, district, note, deposit, price_override, delivery_cycle, delivery_day,
-       gas_type, cylinders_held, status, default_order_quantity, default_unit_price)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       gas_type, customer_type, cylinders_held, status, default_order_quantity, default_unit_price)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       name, phone, address, district, note, deposit, priceOverride, deliveryCycle, deliveryDay,
-      gasType, cylindersHeld, 'ACTIVE', default_order_quantity ?? null, default_unit_price ?? null,
+      gasType, customerType || 'UNKNOWN', cylindersHeld, 'ACTIVE', default_order_quantity ?? null, default_unit_price ?? null,
     ]
   ) as any
   const customerId = result.insertId
@@ -59,7 +59,7 @@ export async function createCustomer(req: Request, res: Response) {
 
 export async function updateCustomer(req: Request, res: Response) {
   const id = Number(req.params.id)
-  const fields = ['name', 'phone', 'phone2', 'address', 'district', 'note', 'deposit', 'price_override', 'delivery_cycle', 'delivery_day', 'gas_type', 'cylinders_held', 'status', 'default_order_quantity', 'default_unit_price']
+  const fields = ['name', 'phone', 'phone2', 'address', 'district', 'note', 'deposit', 'price_override', 'delivery_cycle', 'delivery_day', 'gas_type', 'customer_type', 'cylinders_held', 'status', 'default_order_quantity', 'default_unit_price']
   const updates: string[] = []
   const params: any[] = []
   const body: any = req.body

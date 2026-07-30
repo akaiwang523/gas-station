@@ -1,15 +1,28 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
 
+// 資料量不足時的預設值：單桶大概能撐幾天，依客戶類型區分
+// （營業用通常用量大、撐比較短；一般住家用量小、撐比較久）
+// 注意：customer_type 是資料庫既有欄位，允許值是 RESIDENTIAL / COMMERCIAL / UNKNOWN（不能是 NULL），
+// 不是後來新設計的 BUSINESS，這裡要對齊既有欄位定義
+const DEFAULT_DAYS_PER_BOTTLE: Record<string, number> = {
+  COMMERCIAL: 5,
+  RESIDENTIAL: 30,
+}
+const MIN_DAYS_PER_BOTTLE = 3
+const MAX_DAYS_PER_BOTTLE = 60
+
 export async function getPredictions(req: Request, res: Response) {
   try {
-    // 撈出歷史訂單 >= 3 筆的活躍客戶，取最近 4 筆
+    // 撈出「至少有 1 筆訂單」的活躍客戶——降低門檻是因為現在改成資料不夠時會用
+    // 客戶類型的預設值頂上，所以不用像以前那樣硬性要求至少 3 筆才能進入預測名單，
+    // 只要有 1 筆訂單當「上次配送」的基準點就能推算
     const [customers] = await db.query(
-      `SELECT c.id, c.name, c.phone,
+      `SELECT c.id, c.name, c.phone, c.customer_type,
               (SELECT COUNT(*) FROM orders WHERE customer_id = c.id AND status != 'CANCELLED') as order_count
        FROM customers c
        WHERE c.status = 'ACTIVE'
-       HAVING order_count >= 3`
+       HAVING order_count >= 1`
     ) as any
 
     // 「取消提醒」的紀錄：只要取消時間晚於這位客戶最後一筆訂單，就代表這一輪提醒已經被處理過了，先跳過；
@@ -38,42 +51,58 @@ export async function getPredictions(req: Request, res: Response) {
         [customer.id]
       ) as any
 
-      if (orders.length < 3) continue
+      if (orders.length === 0) continue
 
       // 這一輪提醒被取消過，而且之後沒有新訂單進來，就先不顯示
       const lastOrderTime = new Date(orders[0].created_at).getTime()
       if (dismissedAt[customer.id] && dismissedAt[customer.id] >= lastOrderTime) continue
 
-      // 用「量」不是「次數」去算：這次叫得多，理論上要撐比較久才會再打來，
-      // 不能像以前那樣不管每次叫幾桶，通通當成同一次「訂購」去算平均間隔——
-      // 改成先算這位客戶平均一天大概用掉幾桶（每個區間的桶數 ÷ 那段區間的天數），
-      // 再用「上次實際叫了幾桶」反推這批貨大概能撐幾天，藉此推算下次配送日
-      const chronological = [...orders].reverse() as any[] // 轉成舊到新，方便算區間
-      const dailyRates: number[] = []
-      for (let i = 0; i < chronological.length - 1; i++) {
-        const days = (new Date(chronological[i + 1].created_at).getTime() - new Date(chronological[i].created_at).getTime()) / (1000 * 60 * 60 * 24)
-        const qty = Number(chronological[i].total_quantity) || 1
-        if (days > 0) dailyRates.push(qty / days)
+      let daysPerBottle: number
+      let confidence: 'default' | 'low' | 'normal'
+      let sampleSize = 0
+
+      if (orders.length < 3) {
+        // 資料量門檻：歷史下單天數不到 3 天，樣本太少不採計歷史平均，
+        // 直接套用客戶類型的預設值（沒設定類型的客戶，先當一般住家處理，比較保守不會太常打擾）
+        daysPerBottle = DEFAULT_DAYS_PER_BOTTLE[customer.customer_type] ?? DEFAULT_DAYS_PER_BOTTLE.RESIDENTIAL
+        confidence = 'default'
+      } else {
+        // 用「量」不是「次數」去算：這次叫得多，理論上要撐比較久才會再打來，
+        // 不能像以前那樣不管每次叫幾桶，通通當成同一次「訂購」去算平均間隔——
+        // 改成先算這位客戶平均一天大概用掉幾桶（每個區間的桶數 ÷ 那段區間的天數），
+        // 再反推「一桶大概能撐幾天」
+        const chronological = [...orders].reverse() as any[] // 轉成舊到新，方便算區間
+        const dailyRates: number[] = []
+        for (let i = 0; i < chronological.length - 1; i++) {
+          const days = (new Date(chronological[i + 1].created_at).getTime() - new Date(chronological[i].created_at).getTime()) / (1000 * 60 * 60 * 24)
+          const qty = Number(chronological[i].total_quantity) || 1
+          if (days > 0) dailyRates.push(qty / days)
+        }
+
+        if (dailyRates.length === 0) {
+          daysPerBottle = DEFAULT_DAYS_PER_BOTTLE[customer.customer_type] ?? DEFAULT_DAYS_PER_BOTTLE.RESIDENTIAL
+          confidence = 'default'
+        } else {
+          // 用中位數而不是平均數：只要其中一段剛好是異常值（例如那次是進貨囤貨、不是正常消耗），
+          // 平均數會被單一異常值整個拉走，中位數對這種離群值比較不敏感
+          const sortedRates = [...dailyRates].sort((a, b) => a - b)
+          const mid = Math.floor(sortedRates.length / 2)
+          const medianDailyUsage = sortedRates.length % 2 !== 0
+            ? sortedRates[mid]
+            : (sortedRates[mid - 1] + sortedRates[mid]) / 2
+
+          const rawDaysPerBottle = medianDailyUsage > 0 ? 1 / medianDailyUsage : MAX_DAYS_PER_BOTTLE
+          // 上下限夾擊：就算用了中位數，資料還是可能整批偏掉（例如客戶剛好都在特殊時間點叫貨），
+          // 強制夾在 3~60 天之間，避免算出「1 桶只能撐半天」或「1 桶能撐半年」這種不合理的極端值
+          daysPerBottle = Math.min(Math.max(rawDaysPerBottle, MIN_DAYS_PER_BOTTLE), MAX_DAYS_PER_BOTTLE)
+          confidence = 'normal'
+          sampleSize = dailyRates.length
+        }
       }
-      if (dailyRates.length === 0) continue
-
-      // 用中位數而不是平均數：系統剛上線、資料還不多，每位客戶通常只有 2-3 段區間可以算，
-      // 只要其中一段剛好是異常值（例如那次是進貨囤貨、不是正常消耗），平均數會被單一異常值整個拉走，
-      // 中位數對這種離群值比較不敏感，樣本數越少的時候這個差異影響越大
-      const sortedRates = [...dailyRates].sort((a, b) => a - b)
-      const mid = Math.floor(sortedRates.length / 2)
-      const avgDailyUsage = sortedRates.length % 2 !== 0
-        ? sortedRates[mid]
-        : (sortedRates[mid - 1] + sortedRates[mid]) / 2
-
-      // 信心標示：樣本數（區間數）太少時，明確標示「僅供參考」，避免把還在累積資料階段的
-      // 猜測當成準確預測——系統剛上線，大部分客戶現階段都只會落在「僅供參考」，這是預期中的事，
-      // 之後資料累積夠了會自動轉為一般信心
-      const confidence = dailyRates.length >= 3 ? 'normal' : 'low'
 
       const lastOrder = orders[0]
       const lastQuantity = Number(lastOrder.total_quantity) || 1
-      const daysThisBatchLasts = avgDailyUsage > 0 ? lastQuantity / avgDailyUsage : 9999
+      const daysThisBatchLasts = daysPerBottle * lastQuantity
 
       const lastOrderDate = new Date(lastOrder.created_at)
       const predictedDate = new Date(lastOrderDate.getTime() + daysThisBatchLasts * 24 * 60 * 60 * 1000)
@@ -106,15 +135,16 @@ export async function getPredictions(req: Request, res: Response) {
           customerId: customer.id,
           customerName: customer.name,
           customerPhone: customer.phone,
+          customerType: customer.customer_type,
           predictedDate: predictedDate.toISOString().slice(0, 10),
           overdueDays,
-          avgDailyUsage: Math.round(avgDailyUsage * 100) / 100,
+          daysPerBottle: Math.round(daysPerBottle * 10) / 10,
           estimatedDaysPerBatch: Math.round(daysThisBatchLasts),
           lastQuantity,
           lastGasType: lastItems[0]?.gas_type,
           lastUnitPrice: lastItems[0]?.unit_price,
           confidence,
-          sampleSize: dailyRates.length,
+          sampleSize,
         })
       }
     }

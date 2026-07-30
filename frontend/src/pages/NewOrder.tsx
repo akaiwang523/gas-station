@@ -50,6 +50,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [newAddress, setNewAddress] = useState('')
+  const [newCustomerType, setNewCustomerType] = useState('')
   const [items, setItems] = useState<Item[]>([
     { gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: FALLBACK_PRICE.BOTTLED_20KG }
   ])
@@ -175,6 +176,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setNewName('')
     setNewPhone('')
     setNewAddress('')
+    setNewCustomerType('')
     setItems([{ gas_type: 'BOTTLED_20KG', quantity: 1, unit_price: baselinePrices.BOTTLED_20KG }])
     setStairFee(0)
     setPaymentType('CASH')
@@ -198,8 +200,14 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           setLoading(false)
           return
         }
+        if (!newCustomerType) {
+          setError('請選擇客戶類型（營業用／一般住家），這會影響之後的預測補貨提醒')
+          setLoading(false)
+          return
+        }
         const res = await api.createCustomer({
           name: newName, phone: newPhone, address: newAddress, gasType: 'BOTTLED_20KG',
+          customerType: newCustomerType,
         })
         customerId = res.id
       } else if (selected) {
@@ -292,6 +300,15 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
           <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="姓名 *" value={newName} onChange={e => setNewName(e.target.value)} />
           <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="電話 *" value={newPhone} onChange={e => setNewPhone(e.target.value)} />
           <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="地址 *" value={newAddress} onChange={e => setNewAddress(e.target.value)} />
+          <select
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
+            value={newCustomerType}
+            onChange={e => setNewCustomerType(e.target.value)}
+          >
+            <option value="">客戶類型 *（會影響之後的預測補貨提醒）</option>
+            <option value="COMMERCIAL">🏪 營業用</option>
+            <option value="RESIDENTIAL">🏠 一般住家</option>
+          </select>
         </div>
       )}
 

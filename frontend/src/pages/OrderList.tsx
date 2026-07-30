@@ -520,8 +520,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   >✕</button>
                   <div className="flex items-center gap-1 pr-4">
                     <span className="font-bold text-gray-800 text-sm truncate">{p.customerName}</span>
-                    {p.confidence === 'low' && (
-                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0" title="資料還不夠多，準確度僅供參考">僅供參考</span>
+                    {p.confidence === 'default' && (
+                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0" title="資料還不夠多，用客戶類型的預設值估算，僅供參考">僅供參考</span>
                     )}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
@@ -529,7 +529,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
                   )}
                   <div className="text-xs text-gray-500">上次叫 {p.lastQuantity} 桶，預估可撐 {p.estimatedDaysPerBatch} 天</div>
-                  <div className="text-xs text-gray-400">平均用量：每天約 {p.avgDailyUsage} 桶</div>
+                  <div className="text-xs text-gray-400">單桶約撐 {p.daysPerBottle} 天{p.confidence === 'default' ? '（依客戶類型估算）' : ''}</div>
                   <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
                   <a
                     href={`tel:${p.customerPhone}`}
