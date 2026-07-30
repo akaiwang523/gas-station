@@ -23,16 +23,17 @@ export async function getPredictions(req: Request, res: Response) {
     const predictions = []
 
     for (const customer of customers) {
-      // 取最近 4 筆訂單，每筆訂單的桶數用 SUM 加總（一張訂單不管有幾種規格，都算成同一筆、
-      // 用掉的總桶數是所有品項加起來，不能用原本的 LEFT JOIN 沒有 GROUP BY 直接抓，
-      // 不然一張多品項的訂單會被拆成好幾列，誤判成好幾筆訂單，桶數也只會算到其中一個品項）
+      // 取最近 4 個「有下單的日子」，每個日子的桶數用 SUM 加總——
+      // 同一天不管建了幾張單（不管是分次記錄、還是不小心重複建單），都要當成同一次配送需求，
+      // 不能各自成一筆去算間隔，不然兩筆訂單只隔幾小時，天數幾乎是 0，桶數除下去會爆出離譜的用量速度
       const [orders] = await db.query(
-        `SELECT o.id, o.created_at, COALESCE(SUM(oi.quantity), o.quantity) as total_quantity
+        `SELECT MIN(o.id) as id, DATE(o.created_at) as order_date, MAX(o.created_at) as created_at,
+                COALESCE(SUM(oi.quantity), SUM(o.quantity)) as total_quantity
          FROM orders o
          LEFT JOIN order_items oi ON oi.order_id = o.id
          WHERE o.customer_id = ? AND o.status != 'CANCELLED'
-         GROUP BY o.id
-         ORDER BY o.created_at DESC
+         GROUP BY DATE(o.created_at)
+         ORDER BY order_date DESC
          LIMIT 4`,
         [customer.id]
       ) as any
