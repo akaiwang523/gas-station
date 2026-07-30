@@ -67,6 +67,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [returnKg, setReturnKg] = useState('')
   const [returnAction, setReturnAction] = useState('RECORD')
   const [predictions, setPredictions] = useState<any[]>([])
+  const [notifiedIds, setNotifiedIds] = useState<Set<number>>(new Set())
+  const [notifyingId, setNotifyingId] = useState<number | null>(null)
   const [predExpanded, setPredExpanded] = useState(false)
   const [drafts, setDrafts] = useState<Order[]>([])
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
@@ -531,10 +533,31 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   <div className="text-xs text-gray-500">上次叫 {p.lastQuantity} 桶，預估可撐 {p.estimatedDaysPerBatch} 天</div>
                   <div className="text-xs text-gray-400">單桶約撐 {p.daysPerBottle} 天{p.confidence === 'default' ? '（依客戶類型估算）' : ''}</div>
                   <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
-                  <a
-                    href={`tel:${p.customerPhone}`}
-                    className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
-                  >📞 撥打電話</a>
+                  {p.lineBound ? (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(`確定要發送 LINE 補貨提醒給「${p.customerName}」嗎？`)) return
+                        setNotifyingId(p.customerId)
+                        try {
+                          await api.notifyPrediction(p.customerId)
+                          setNotifiedIds(prev => new Set(prev).add(p.customerId))
+                        } catch (e: any) {
+                          alert(e.message || 'LINE 通知失敗')
+                        } finally {
+                          setNotifyingId(null)
+                        }
+                      }}
+                      disabled={notifyingId === p.customerId || notifiedIds.has(p.customerId)}
+                      className="mt-2 w-full py-1.5 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white text-xs font-bold rounded-lg flex items-center justify-center"
+                    >
+                      {notifiedIds.has(p.customerId) ? '✅ 已通知' : notifyingId === p.customerId ? '發送中...' : '📱 LINE 通知'}
+                    </button>
+                  ) : (
+                    <a
+                      href={`tel:${p.customerPhone}`}
+                      className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
+                    >📞 撥打電話</a>
+                  )}
                 </div>
               ))}
             </div>

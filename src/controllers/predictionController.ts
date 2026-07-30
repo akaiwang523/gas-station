@@ -38,6 +38,10 @@ export async function getPredictions(req: Request, res: Response) {
       dismissedAt[d.customer_id] = new Date(d.dismissed_at).getTime()
     }
 
+    // 哪些客戶已經綁定 LINE，決定要不要顯示「LINE 通知」按鈕
+    const [lineBindings] = await db.query(`SELECT DISTINCT customer_id FROM line_users`) as any
+    const lineBoundIds = new Set((lineBindings as any[]).map(r => r.customer_id))
+
     const predictions = []
 
     for (const customer of customers) {
@@ -156,6 +160,7 @@ export async function getPredictions(req: Request, res: Response) {
           lastUnitPrice: lastItems[0]?.unit_price,
           confidence,
           sampleSize,
+          lineBound: lineBoundIds.has(customer.id),
         })
       }
     }
@@ -181,4 +186,43 @@ export async function dismissPrediction(req: Request, res: Response) {
     [customerId]
   )
   res.json({ ok: true })
+}
+
+// 手動推播「預測補貨」提醒給客戶的 LINE——刻意設計成要人工按一下才會發，
+// 不做成偵測到就自動全部推播，避免資料還不準確（僅供參考階段）的預測干擾到客戶
+export async function notifyPrediction(req: Request, res: Response) {
+  try {
+    const customerId = Number(req.params.customerId)
+    if (!customerId) return res.status(400).json({ error: '缺少客戶編號' })
+
+    const [binding] = await db.query(
+      `SELECT line_user_id FROM line_users WHERE customer_id = ?`,
+      [customerId]
+    ) as any
+    if (!binding[0]) return res.status(400).json({ error: '這位客戶還沒綁定 LINE' })
+
+    const [customerRows] = await db.query(`SELECT name FROM customers WHERE id = ?`, [customerId]) as any
+    if (!customerRows[0]) return res.status(404).json({ error: '客戶不存在' })
+
+    const { pushMessage } = await import('./lineController')
+    await pushMessage(binding[0].line_user_id, [
+      {
+        type: 'template',
+        altText: '瓦斯補貨提醒',
+        template: {
+          type: 'buttons',
+          text: `${customerRows[0].name} 您好 👋\n瓦斯桶用量估算，您可能快用完了，需要我們幫您補貨嗎？`,
+          actions: [
+            { type: 'postback', label: '⚡ 一鍵叫瓦斯（照上次）', data: 'action=quick_order' },
+            { type: 'postback', label: '🛒 我要叫瓦斯（自選）', data: 'action=order' },
+          ],
+        },
+      },
+    ])
+
+    res.json({ ok: true })
+  } catch (err: any) {
+    console.error('[notifyPrediction]', err)
+    res.status(500).json({ error: err.message || '推播失敗' })
+  }
 }

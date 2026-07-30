@@ -69,6 +69,7 @@ export const api = {
   getTodaySummary: () => request('/orders/summary'),
   getPredictions: () => request('/predictions'),
   dismissPrediction: (customerId: number) => request(`/predictions/${customerId}/dismiss`, { method: 'POST' }),
+  notifyPrediction: (customerId: number) => request(`/predictions/${customerId}/notify`, { method: 'POST' }),
   createOrder: (data: any) =>
     request('/orders', { method: 'POST', body: JSON.stringify(data) }),
   updateOrderStatus: (id: number, status: string, driverId?: number) =>

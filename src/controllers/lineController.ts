@@ -11,7 +11,7 @@ function verifySignature(body: Buffer, signature: string): boolean {
   return hash === signature
 }
 
-// 傳訊息給使用者
+// 傳訊息給使用者（回覆客戶主動傳來的訊息用）
 async function replyMessage(replyToken: string, messages: any[]) {
   await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
@@ -21,6 +21,22 @@ async function replyMessage(replyToken: string, messages: any[]) {
     },
     body: JSON.stringify({ replyToken, messages })
   })
+}
+
+// 主動推播訊息給使用者（不需要客戶先傳訊息，系統可以主動發起——例如預測補貨提醒）
+export async function pushMessage(lineUserId: string, messages: any[]) {
+  const res = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${ACCESS_TOKEN}`
+    },
+    body: JSON.stringify({ to: lineUserId, messages })
+  })
+  if (res.status !== 200) {
+    const errText = await res.text()
+    throw new Error(`LINE 推播失敗: ${errText}`)
+  }
 }
 
 // 主選單按鈕
