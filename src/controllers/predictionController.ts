@@ -9,7 +9,12 @@ const DEFAULT_DAYS_PER_BOTTLE: Record<string, number> = {
   COMMERCIAL: 5,
   RESIDENTIAL: 30,
 }
-const MIN_DAYS_PER_BOTTLE = 3
+// 下限不是固定值，而是依「這位客戶平均每次訂購幾桶」動態調整——
+// 一次訂比較多桶的客戶（例如餐飲業一次叫 2-3 桶），用量規模本來就大，
+// 不該用跟「一次只訂 1 桶」的客戶同一套下限去卡他，否則會像白妞民族那樣，
+// 明明實際算出來單桶只需要 1.5 天，卻被固定下限 3 天硬拉高，預測日期整整晚了快一週
+const ABSOLUTE_MIN_DAYS_PER_BOTTLE = 1 // 下限本身也有下限，避免動態算出離譜的極端值
+const BASE_MIN_DAYS_PER_BOTTLE = 3 // 平均每次只訂 1 桶時的下限（維持原本設計）
 const MAX_DAYS_PER_BOTTLE = 60
 
 export async function getPredictions(req: Request, res: Response) {
@@ -91,10 +96,16 @@ export async function getPredictions(req: Request, res: Response) {
             ? sortedRates[mid]
             : (sortedRates[mid - 1] + sortedRates[mid]) / 2
 
+          // 動態下限：平均每次訂購桶數越多，下限跟著等比例降低——
+          // 例如平均每次訂 2 桶，下限就從 3 天降到 1.5 天；平均訂 3 桶以上，下限降到 1 天封頂
+          const avgQtyPerOrder = chronological.reduce((s, o: any) => s + (Number(o.total_quantity) || 1), 0) / chronological.length
+          const dynamicMinDaysPerBottle = Math.max(BASE_MIN_DAYS_PER_BOTTLE / Math.max(avgQtyPerOrder, 1), ABSOLUTE_MIN_DAYS_PER_BOTTLE)
+
           const rawDaysPerBottle = medianDailyUsage > 0 ? 1 / medianDailyUsage : MAX_DAYS_PER_BOTTLE
           // 上下限夾擊：就算用了中位數，資料還是可能整批偏掉（例如客戶剛好都在特殊時間點叫貨），
-          // 強制夾在 3~60 天之間，避免算出「1 桶只能撐半天」或「1 桶能撐半年」這種不合理的極端值
-          daysPerBottle = Math.min(Math.max(rawDaysPerBottle, MIN_DAYS_PER_BOTTLE), MAX_DAYS_PER_BOTTLE)
+          // 強制夾在「動態下限～60 天」之間，避免算出不合理的極端值，
+          // 同時不會誤傷那些原本就一次訂很多桶、用量本來就快的客戶
+          daysPerBottle = Math.min(Math.max(rawDaysPerBottle, dynamicMinDaysPerBottle), MAX_DAYS_PER_BOTTLE)
           confidence = 'normal'
           sampleSize = dailyRates.length
         }
