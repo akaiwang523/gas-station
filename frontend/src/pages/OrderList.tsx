@@ -758,7 +758,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div
                 className="hidden lg:grid items-center gap-4 cursor-pointer"
-                style={{ gridTemplateColumns: '40% 18% 16% 26%' }}
+                style={{ gridTemplateColumns: '40fr 18fr 16fr 26fr' }}
                 onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
               >
                 {/* 第一欄 40%：狀態、客戶姓名、地址、下單時間 */}
@@ -802,8 +802,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
                       <span className="whitespace-nowrap overflow-hidden text-ellipsis">{order.customer_address}</span>
                     </a>
-                    {order.call_time && (
-                      <div style={{ fontSize: 12, color: '#6B7280' }}>下單 {new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>
+                    {lastDelivery && (
+                      <div style={{ fontSize: 12, color: '#6B7280' }}>上次 {daysAgoLabel(lastDelivery.created_at)}</div>
                     )}
                   </div>
                 </div>
@@ -822,9 +822,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   </div>
                   <div className="flex items-center gap-1 whitespace-nowrap" style={{ fontSize: 12, color: '#6B7280' }}>
                     <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-                    {order.scheduled_date
-                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '—')}
+                    {order.call_time
+                      ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })
+                      : (order.scheduled_date ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' }) : '—')}
                   </div>
                 </div>
                 {/* 第四欄 26%：操作按鈕，固定寬度、靠右對齊 */}
