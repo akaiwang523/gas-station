@@ -620,7 +620,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           return (
           <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
             {s === 'ALL' ? '全部' : s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
-            {count != null && <span className="ml-1 opacity-70">{count}</span>}
+            {s !== 'ALL' && count != null && <span className="ml-1 opacity-70">{count}</span>}
           </button>
           )
         })}
@@ -745,22 +745,15 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div className="hidden lg:flex items-center gap-2 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="w-24 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
-                  <div className="flex items-center gap-2">
-                    {selectMode && (
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(order.id)}
-                        onChange={() => toggleSelectOrder(order.id)}
-                        onClick={e => e.stopPropagation()}
-                        className="w-5 h-5 accent-orange-500 flex-shrink-0"
-                      />
-                    )}
-                    <span className="text-xs text-gray-400">
-                      {order.scheduled_date
-                        ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                        : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
-                    </span>
-                  </div>
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(order.id)}
+                      onChange={() => toggleSelectOrder(order.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="w-5 h-5 accent-orange-500 flex-shrink-0"
+                    />
+                  )}
                   {order.status === 'PENDING' && !isFutureScheduled(order) && (
                     <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
                       className="w-full h-9 px-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
@@ -776,6 +769,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       ✅ 完成送達
                     </button>
                   )}
+                  <div className="text-xs text-gray-400 text-center">
+                    {order.scheduled_date
+                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                  </div>
                 </div>
                 <div className="w-48 flex-shrink-0 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -798,13 +796,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     📍{order.customer_address}
                   </a>
                 </div>
-                <div className="flex-shrink-0 font-semibold text-gray-800 whitespace-nowrap">
+                <div className="flex-1 min-w-0 font-semibold text-gray-800 truncate">
                   {order.items && order.items.length > 0
                     ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
                     : `${order.quantity} 桶`}
                 </div>
-                <div className="flex-shrink-0 min-w-0 max-w-[120px]">
-                  <div className="font-bold text-gray-800 truncate">${Number(order.total_amount).toLocaleString()}</div>
+                <div className="flex-shrink-0">
+                  <div className="font-bold text-gray-800 whitespace-nowrap">${Number(order.total_amount).toLocaleString()}</div>
                   {order.payment_type === 'AR' && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>
                   )}
