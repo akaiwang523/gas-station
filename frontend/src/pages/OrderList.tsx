@@ -36,6 +36,13 @@ const STATUS_BORDER: Record<string, string> = {
 const GAS_LABELS: Record<string, string> = {
   BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_10KG: '10kg', BOTTLED_4KG: '4kg',
 }
+// 橫向列（iPad landscape）專用狀態色票，跟設計稿的色碼對齊
+const ROW_STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; label: string }> = {
+  PENDING: { dot: '#F59E0B', bg: '#FEF3C7', text: '#92400E', label: '待派送' },
+  ASSIGNED: { dot: '#3B82F6', bg: '#EFF6FF', text: '#1E40AF', label: '配送中' },
+  DELIVERING: { dot: '#3B82F6', bg: '#EFF6FF', text: '#1E40AF', label: '配送中' },
+}
+const ROW_SCHEDULED_STYLE = { dot: '#8B5CF6', bg: '#F3E8FF', text: '#5B21B6', label: '已排定' }
 // 產生 Google Maps 導航連結
 function mapsUrl(address: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
@@ -659,8 +666,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         <div className="space-y-3">
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
+            const rowStatus = isFutureScheduled(order) ? ROW_SCHEDULED_STYLE : (ROW_STATUS_STYLE[order.status] || ROW_STATUS_STYLE.PENDING)
             return (
-            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 rounded-xl p-4 lg:py-2.5 lg:px-4 lg:min-h-[76px] shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`} style={{ borderLeftColor: rowStatus.dot }}>
               {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
               <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
@@ -750,10 +758,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div
                 className="hidden lg:grid items-center gap-4 cursor-pointer"
-                style={{ gridTemplateColumns: '3fr 1fr 1fr 1fr' }}
+                style={{ gridTemplateColumns: '40% 18% 16% 26%' }}
                 onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
               >
-                {/* 第一欄：狀態、客戶姓名、地址 */}
+                {/* 第一欄 40%：狀態、客戶姓名、地址、下單時間 */}
                 <div className="min-w-0 flex items-start gap-2">
                   {selectMode && (
                     <input
@@ -765,11 +773,14 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     />
                   )}
                   <div className="min-w-0">
-                    {isFutureScheduled(order) && (
-                      <span className="inline-block mb-1 text-xs px-2 py-0.5 rounded-full font-medium bg-gray-50 text-gray-400 whitespace-nowrap">未到配送日</span>
-                    )}
+                    <span
+                      className="inline-block mb-1 rounded-full font-medium whitespace-nowrap"
+                      style={{ background: rowStatus.bg, color: rowStatus.text, fontSize: 11, padding: '2px 8px' }}
+                    >
+                      {rowStatus.label}
+                    </span>
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="font-bold text-gray-800 truncate">{order.customer_name}</span>
+                      <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
                       {onEditCustomer && (
                         <button
                           onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -785,52 +796,72 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 min-w-0"
+                      className="flex items-center gap-1 hover:text-blue-600 min-w-0"
+                      style={{ fontSize: 13, color: '#4B5563' }}
                     >
                       <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
                       <span className="whitespace-nowrap overflow-hidden text-ellipsis">{order.customer_address}</span>
                     </a>
+                    {order.call_time && (
+                      <div style={{ fontSize: 12, color: '#6B7280' }}>下單 {new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>
+                    )}
                   </div>
                 </div>
-                {/* 第二欄：品項規格 */}
-                <div className="min-w-0 font-semibold text-gray-800 text-sm whitespace-nowrap overflow-hidden text-ellipsis">
+                {/* 第二欄 18%：品項 */}
+                <div className="min-w-0 whitespace-nowrap overflow-hidden text-ellipsis" style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
                   {order.items && order.items.length > 0
                     ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join('、')
                     : `${order.quantity} 桶`}
                 </div>
-                {/* 第三欄：金額與付款狀態 */}
+                {/* 第三欄 16%：金額、付款方式、時間 */}
                 <div className="min-w-0">
-                  <div className="font-bold text-gray-800 whitespace-nowrap">${Number(order.total_amount).toLocaleString()}</div>
-                  {order.payment_type === 'AR' && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">欠帳</span>
-                  )}
-                </div>
-                {/* 第四欄：時間紀錄與操作按鈕，鎖在最右側 */}
-                <div className="min-w-0 flex flex-col items-end justify-center gap-2" onClick={e => e.stopPropagation()}>
-                  <div className="w-full text-right">
-                    <div className="flex items-center justify-end gap-1 text-gray-700 font-semibold text-sm whitespace-nowrap">
-                      <svg className="flex-shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-                      <span>
-                        {order.scheduled_date
-                          ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                          : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '—')}
-                      </span>
-                    </div>
-                    {lastDelivery && (
-                      <div className="text-xs text-gray-400 whitespace-nowrap">上次 {daysAgoLabel(lastDelivery.created_at)}</div>
-                    )}
+                  <div className="whitespace-nowrap" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>${Number(order.total_amount).toLocaleString()}</div>
+                  <div className="flex items-center gap-1 whitespace-nowrap" style={{ fontSize: 12, color: '#6B7280' }}>
+                    <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/></svg>
+                    {order.payment_type === 'AR' ? '欠帳' : '現金'}
                   </div>
+                  <div className="flex items-center gap-1 whitespace-nowrap" style={{ fontSize: 12, color: '#6B7280' }}>
+                    <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+                    {order.scheduled_date
+                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '—')}
+                  </div>
+                </div>
+                {/* 第四欄 26%：操作按鈕，固定寬度、靠右對齊 */}
+                <div className="min-w-0 flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
                   {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
-                      className="mt-1 h-9 px-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
-                      開始配送
-                    </button>
+                    <>
+                      <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
+                        style={{ width: 104 }}
+                        className="h-9 flex items-center justify-center gap-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="15" height="10" rx="1"/><path d="M16 10h4l3 3v4h-7z"/><circle cx="6" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>
+                        開始配送
+                      </button>
+                      <button onClick={() => toggleExpand(order)} className="w-7 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 flex-shrink-0" title="更多">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                      </button>
+                    </>
+                  )}
+                  {order.status === 'PENDING' && isFutureScheduled(order) && (
+                    <div style={{ width: 104 }} className="h-9 flex items-center justify-center bg-gray-50 text-gray-400 text-xs font-medium rounded-lg whitespace-nowrap">未到配送日</div>
                   )}
                   {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                    <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
-                      className="mt-1 h-9 px-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
-                      完成送達
-                    </button>
+                    <div className="flex flex-col gap-1.5">
+                      {order.customer_phone && (
+                        <a href={`tel:${order.customer_phone}`} onClick={e => e.stopPropagation()}
+                          style={{ width: 104 }}
+                          className="h-8 flex items-center justify-center gap-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                          聯絡客戶
+                        </a>
+                      )}
+                      <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
+                        style={{ width: 104 }}
+                        className="h-8 flex items-center justify-center gap-1.5 border border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                        完成配送
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
