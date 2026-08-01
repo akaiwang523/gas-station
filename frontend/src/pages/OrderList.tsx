@@ -73,6 +73,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [predExpanded, setPredExpanded] = useState(false)
   const [lineInquiries, setLineInquiries] = useState<any[]>([])
   const [inquiriesExpanded, setInquiriesExpanded] = useState(false)
+  const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>({})
   const [inquiryActionId, setInquiryActionId] = useState<number | null>(null)
   const [drafts, setDrafts] = useState<Order[]>([])
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
@@ -149,6 +150,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     }
   }
   useEffect(() => { load() }, [filter, refresh])
+  useEffect(() => { api.getBaselinePrices().then(res => setBaselinePrices(res.prices || {})).catch(() => {}) }, [])
   // 取得某筆訂單「上一次」的配送紀錄（排除自己）
   function getLastDelivery(order: Order) {
     const hist = customerHistory[order.customer_id]
@@ -200,16 +202,19 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
       setEditLoading(false)
     }
   }
-  // 更新編輯中某個品項的某個欄位
+  // 更新編輯中某個品項的某個欄位（新增、尚未存檔的品項，改規格時價格自動帶入該規格的目前基準價）
   function updateEditItem(index: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
-    setEditItems(items => items.map((it, i) => i === index ? { ...it, [field]: value } : it))
+    setEditItems(items => items.map((it, i) => {
+      if (i !== index) return it
+      if (field === 'gasType' && it.id === 0) {
+        return { ...it, gasType: value, unitPrice: String(baselinePrices[value] || it.unitPrice || '') }
+      }
+      return { ...it, [field]: value }
+    }))
   }
-  // 新增一個空白品項（預設 20kg，桶數 1，單價沿用最後一個品項的單價方便快速輸入）
+  // 新增一個空白品項（預設 20kg，桶數 1，單價直接帶入目前的基準價，不用手動填）
   function addEditItem() {
-    setEditItems(items => {
-      const lastPrice = items.length > 0 ? items[items.length - 1].unitPrice : ''
-      return [...items, { id: 0, gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: lastPrice }]
-    })
+    setEditItems(items => [...items, { id: 0, gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: String(baselinePrices.BOTTLED_20KG || '') }])
   }
   // 移除一個品項（至少保留一個，不能刪到完全沒有品項）
   function removeEditItem(index: number) {
@@ -655,7 +660,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
             return (
-            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+            <div key={order.id} className="flex items-start gap-2">
+            <div className={`relative flex-1 min-w-0 bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
               {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
               <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
@@ -744,11 +750,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div className="hidden lg:flex items-center gap-2 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <span className="hidden lg:block absolute top-2 right-3 text-xs text-gray-400">
-                  {order.scheduled_date
-                    ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                    : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
-                </span>
                 <div className="w-24 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
                   {selectMode && (
                     <input
@@ -935,6 +936,12 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   </button>
                 )}
               </div>
+            </div>
+            <div className="hidden lg:block flex-shrink-0 w-20 pt-3 text-xs text-gray-400 leading-relaxed">
+              {order.call_time && <div>{new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>}
+              {order.scheduled_date && <div>{new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}</div>}
+              {lastDelivery && <div>上次 {daysAgoLabel(lastDelivery.created_at)}</div>}
+            </div>
             </div>
             )
           })}
