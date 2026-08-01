@@ -737,17 +737,24 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div className="hidden lg:flex items-center gap-3 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="flex items-center gap-2 w-24 flex-shrink-0">
-                  {selectMode && (
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(order.id)}
-                      onChange={() => toggleSelectOrder(order.id)}
-                      onClick={e => e.stopPropagation()}
-                      className="w-5 h-5 accent-orange-500 flex-shrink-0"
-                    />
-                  )}
-                  <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
+                <div className="w-24 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(order.id)}
+                        onChange={() => toggleSelectOrder(order.id)}
+                        onClick={e => e.stopPropagation()}
+                        className="w-5 h-5 accent-orange-500 flex-shrink-0"
+                      />
+                    )}
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    {order.scheduled_date
+                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                  </div>
                 </div>
                 <div className="w-48 flex-shrink-0 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -777,20 +784,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 </div>
                 <div className="w-24 flex-shrink-0">
                   <div className="font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
-                    {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
-                  </span>
-                </div>
-                <div className="w-16 flex-shrink-0 text-xs text-gray-400">
-                  {order.scheduled_date
-                    ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                    : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                  {order.payment_type === 'AR' && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>
+                  )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0 ml-auto" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => cancelOrder(order.id)} disabled={actionId === order.id}
-                    className="h-11 px-4 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium rounded-lg transition">
-                    取消
-                  </button>
                   {order.status === 'PENDING' && !isFutureScheduled(order) && (
                     <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
                       className="h-11 px-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
@@ -904,6 +902,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   <button onClick={e => { e.stopPropagation(); saveEdit(order) }} disabled={editLoading}
                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
                     {editLoading ? '儲存中...' : '💾 儲存修改'}
+                  </button>
+                  <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
+                    className="hidden lg:block w-full text-center text-sm text-gray-400 hover:text-red-500 py-1.5">
+                    取消此筆訂單
                   </button>
                 </div>
               )}
