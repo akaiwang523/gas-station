@@ -243,7 +243,7 @@ export async function getTodaySummary(_req: Request, res: Response) {
       SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending_count,
       SUM(CASE WHEN status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered_count
      FROM orders
-     WHERE DATE(created_at) = CURDATE()`
+     WHERE DATE(created_at) = CURDATE() AND status != 'CANCELLED'`
   ) as any
   res.json(rows[0])
 }

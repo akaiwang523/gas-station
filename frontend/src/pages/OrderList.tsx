@@ -888,7 +888,15 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 </div>
                 <div className="text-right">
                   <div className="text-sm text-gray-500">${Number(order.total_amount).toLocaleString()}</div>
-                  <div className="text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '編輯 ▾'}</div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteOrder(order.id) }}
+                      disabled={actionId === order.id}
+                      className="text-xs text-gray-300 hover:text-red-500"
+                      title="刪除訂單"
+                    >🗑 刪除</button>
+                    <span className="text-xs text-gray-300">{expandedId === order.id ? '收合 ▲' : '編輯 ▾'}</span>
+                  </div>
                 </div>
               </div>
               {expandedId === order.id && (
