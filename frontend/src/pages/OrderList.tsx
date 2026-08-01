@@ -370,7 +370,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   : orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
   return (
-    <div className="max-w-lg mx-auto p-4 space-y-4">
+    <div className="max-w-lg lg:max-w-5xl mx-auto p-4 space-y-4">
       <h2 className="text-xl font-bold text-gray-800">📦 今日訂單 <span className="text-sm font-normal text-gray-400">{new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}</span></h2>
       {summary && (
         <div className="grid grid-cols-3 gap-2">
@@ -758,7 +758,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div
                 className="hidden lg:grid items-center gap-4 cursor-pointer"
-                style={{ gridTemplateColumns: '40fr 18fr 16fr 26fr' }}
+                style={{ gridTemplateColumns: 'minmax(200px,40fr) minmax(100px,18fr) minmax(90px,16fr) minmax(150px,26fr)' }}
                 onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
               >
                 {/* 第一欄 40%：狀態、客戶姓名、地址、下單時間 */}
