@@ -648,7 +648,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
             return (
-            <div key={order.id} className={`bg-white border border-gray-200 border-l-4 ${STATUS_BORDER[order.status]} rounded-xl p-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+            <div key={order.id} className={`bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
               {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
               <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
@@ -736,26 +736,26 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
-              <div className="hidden lg:flex items-center gap-4 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="hidden lg:flex items-center gap-3 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
+                <div className="flex items-center gap-2 w-24 flex-shrink-0">
                   {selectMode && (
                     <input
                       type="checkbox"
                       checked={selectedIds.has(order.id)}
                       onChange={() => toggleSelectOrder(order.id)}
                       onClick={e => e.stopPropagation()}
-                      className="w-5 h-5 accent-orange-500"
+                      className="w-5 h-5 accent-orange-500 flex-shrink-0"
                     />
                   )}
                   <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
                 </div>
-                <div className="min-w-[170px]">
+                <div className="w-48 flex-shrink-0 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-gray-800">{order.customer_name}</span>
+                    <span className="font-bold text-gray-800 truncate">{order.customer_name}</span>
                     {onEditCustomer && (
                       <button
                         onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                        className="text-xs text-blue-500"
+                        className="text-xs text-blue-500 flex-shrink-0"
                         title="編輯客戶資料"
                       >✏️</button>
                     )}
@@ -765,29 +765,28 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
-                    className="text-xs text-gray-500 hover:text-blue-600 truncate block max-w-[220px]"
+                    className="text-xs text-gray-500 hover:text-blue-600 truncate block"
                   >
                     📍{order.customer_address}
                   </a>
                 </div>
-                <div className="min-w-[140px] font-semibold text-gray-800">
+                <div className="w-32 flex-shrink-0 font-semibold text-gray-800 truncate">
                   {order.items && order.items.length > 0
                     ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
                     : `${order.quantity} 桶`}
                 </div>
-                <div className="min-w-[90px]">
+                <div className="w-24 flex-shrink-0">
                   <div className="font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
                     {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
                   </span>
                 </div>
-                <div className="min-w-[60px] text-xs text-gray-400">
+                <div className="w-16 flex-shrink-0 text-xs text-gray-400">
                   {order.scheduled_date
                     ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
                     : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
                 </div>
-                <div className="flex-1" />
-                <div className="flex gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-2 flex-shrink-0 ml-auto" onClick={e => e.stopPropagation()}>
                   <button onClick={() => cancelOrder(order.id)} disabled={actionId === order.id}
                     className="h-11 px-4 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium rounded-lg transition">
                     取消
