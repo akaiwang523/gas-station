@@ -370,7 +370,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   : orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
   return (
-    <div className="max-w-lg lg:max-w-5xl mx-auto p-4 space-y-4">
+    <div className="max-w-lg lg:max-w-3xl mx-auto p-4 space-y-4">
       <h2 className="text-xl font-bold text-gray-800">📦 今日訂單 <span className="text-sm font-normal text-gray-400">{new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}</span></h2>
       {summary && (
         <div className="grid grid-cols-3 gap-2">
@@ -807,11 +807,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     )}
                   </div>
                 </div>
-                {/* 第二欄 18%：品項 */}
-                <div className="min-w-0 whitespace-nowrap overflow-hidden text-ellipsis" style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                {/* 第二欄 18%：品項，依序由上往下排列 */}
+                <div className="min-w-0" style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
                   {order.items && order.items.length > 0
-                    ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join('、')
-                    : `${order.quantity} 桶`}
+                    ? order.items.map((i: any, idx: number) => (
+                        <div key={idx} className="whitespace-nowrap overflow-hidden text-ellipsis">{GAS_LABELS[i.gas_type]}×{i.quantity}</div>
+                      ))
+                    : <div className="whitespace-nowrap">{order.quantity} 桶</div>}
                 </div>
                 {/* 第三欄 16%：金額、付款方式、時間 */}
                 <div className="min-w-0">
