@@ -364,7 +364,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
   return (
     <div className="max-w-lg mx-auto p-4 space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">📦 今日訂單</h2>
+      <h2 className="text-xl font-bold text-gray-800">📦 今日訂單 <span className="text-sm font-normal text-gray-400">{new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}</span></h2>
       {summary && (
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-orange-50 rounded-xl p-3 text-center">
@@ -660,8 +660,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
             return (
-            <div key={order.id} className="flex items-start gap-2">
-            <div className={`relative flex-1 min-w-0 bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
               {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
               <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
@@ -797,7 +796,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     📍{order.customer_address}
                   </a>
                 </div>
-                <div className="flex-1 min-w-0 flex flex-wrap gap-x-1.5 gap-y-0 font-semibold text-gray-800 text-sm">
+                <div className="flex-1 min-w-0 flex flex-wrap gap-x-1.5 gap-y-0 font-semibold text-gray-800 text-sm mr-3">
                   {order.items && order.items.length > 0
                     ? order.items.map((i: any, idx: number) => <span key={idx} className="whitespace-nowrap">{GAS_LABELS[i.gas_type]}×{i.quantity}</span>)
                     : <span className="whitespace-nowrap">{order.quantity} 桶</span>}
@@ -807,6 +806,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   {order.payment_type === 'AR' && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>
                   )}
+                </div>
+                <div className="flex-shrink-0 w-20 pl-3 ml-1 border-l border-gray-100 text-xs text-gray-400 leading-relaxed">
+                  {order.call_time && <div>{new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>}
+                  {order.scheduled_date && <div>{new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}</div>}
+                  {lastDelivery && <div>上次 {daysAgoLabel(lastDelivery.created_at)}</div>}
                 </div>
               </div>
               {/* 展開區塊 */}
@@ -936,12 +940,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   </button>
                 )}
               </div>
-            </div>
-            <div className="hidden lg:block flex-shrink-0 w-20 pt-3 text-xs text-gray-400 leading-relaxed">
-              {order.call_time && <div>{new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>}
-              {order.scheduled_date && <div>{new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}</div>}
-              {lastDelivery && <div>上次 {daysAgoLabel(lastDelivery.created_at)}</div>}
-            </div>
             </div>
             )
           })}
