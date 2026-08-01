@@ -748,69 +748,90 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
-              <div className="hidden lg:flex items-center gap-2 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="w-24 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
+              <div
+                className="hidden lg:grid items-center gap-4 cursor-pointer"
+                style={{ gridTemplateColumns: '3fr 1fr 1fr 1fr' }}
+                onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
+              >
+                {/* 第一欄：狀態、客戶姓名、地址 */}
+                <div className="min-w-0 flex items-start gap-2">
                   {selectMode && (
                     <input
                       type="checkbox"
                       checked={selectedIds.has(order.id)}
                       onChange={() => toggleSelectOrder(order.id)}
                       onClick={e => e.stopPropagation()}
-                      className="w-5 h-5 accent-orange-500 flex-shrink-0"
+                      className="w-5 h-5 mt-0.5 accent-orange-500 flex-shrink-0"
                     />
                   )}
+                  <div className="min-w-0">
+                    {isFutureScheduled(order) && (
+                      <span className="inline-block mb-1 text-xs px-2 py-0.5 rounded-full font-medium bg-gray-50 text-gray-400 whitespace-nowrap">未到配送日</span>
+                    )}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-bold text-gray-800 truncate">{order.customer_name}</span>
+                      {onEditCustomer && (
+                        <button
+                          onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                          className="text-gray-400 hover:text-blue-500 flex-shrink-0"
+                          title="編輯客戶資料"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                        </button>
+                      )}
+                    </div>
+                    <a
+                      href={mapsUrl(order.customer_address)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 min-w-0"
+                    >
+                      <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                      <span className="whitespace-nowrap overflow-hidden text-ellipsis">{order.customer_address}</span>
+                    </a>
+                  </div>
+                </div>
+                {/* 第二欄：品項規格 */}
+                <div className="min-w-0 font-semibold text-gray-800 text-sm whitespace-nowrap overflow-hidden text-ellipsis">
+                  {order.items && order.items.length > 0
+                    ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join('、')
+                    : `${order.quantity} 桶`}
+                </div>
+                {/* 第三欄：金額與付款狀態 */}
+                <div className="min-w-0">
+                  <div className="font-bold text-gray-800 whitespace-nowrap">${Number(order.total_amount).toLocaleString()}</div>
+                  {order.payment_type === 'AR' && (
+                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">欠帳</span>
+                  )}
+                </div>
+                {/* 第四欄：時間紀錄與操作按鈕，鎖在最右側 */}
+                <div className="min-w-0 flex flex-col items-end justify-center gap-2" onClick={e => e.stopPropagation()}>
+                  <div className="w-full text-right">
+                    <div className="flex items-center justify-end gap-1 text-gray-700 font-semibold text-sm whitespace-nowrap">
+                      <svg className="flex-shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+                      <span>
+                        {order.scheduled_date
+                          ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                          : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '—')}
+                      </span>
+                    </div>
+                    {lastDelivery && (
+                      <div className="text-xs text-gray-400 whitespace-nowrap">上次 {daysAgoLabel(lastDelivery.created_at)}</div>
+                    )}
+                  </div>
                   {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
-                      className="w-full h-9 px-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
+                    <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
+                      className="mt-1 h-9 px-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
                       開始配送
                     </button>
                   )}
-                  {order.status === 'PENDING' && isFutureScheduled(order) && (
-                    <div className="w-full h-9 px-2 flex items-center justify-center bg-gray-50 text-gray-400 text-xs font-medium rounded-lg whitespace-nowrap">⏳ 未到配送日</div>
-                  )}
                   {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                    <button onClick={e => { e.stopPropagation(); markDelivered(order) }} disabled={actionId === order.id}
-                      className="w-full h-9 px-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
-                      ✅ 完成送達
+                    <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
+                      className="mt-1 h-9 px-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
+                      完成送達
                     </button>
                   )}
-                </div>
-                <div className="w-48 flex-shrink-0 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-gray-800 truncate">{order.customer_name}</span>
-                    {onEditCustomer && (
-                      <button
-                        onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                        className="text-xs text-blue-500 flex-shrink-0"
-                        title="編輯客戶資料"
-                      >✏️</button>
-                    )}
-                  </div>
-                  <a
-                    href={mapsUrl(order.customer_address)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={e => e.stopPropagation()}
-                    className="text-xs text-gray-500 hover:text-blue-600 truncate block"
-                  >
-                    📍{order.customer_address}
-                  </a>
-                </div>
-                <div className="flex-1 min-w-0 flex flex-wrap gap-x-1.5 gap-y-0 font-semibold text-gray-800 text-sm mr-3">
-                  {order.items && order.items.length > 0
-                    ? order.items.map((i: any, idx: number) => <span key={idx} className="whitespace-nowrap">{GAS_LABELS[i.gas_type]}×{i.quantity}</span>)
-                    : <span className="whitespace-nowrap">{order.quantity} 桶</span>}
-                </div>
-                <div className="flex-shrink-0">
-                  <div className="font-bold text-gray-800 whitespace-nowrap">${Number(order.total_amount).toLocaleString()}</div>
-                  {order.payment_type === 'AR' && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>
-                  )}
-                </div>
-                <div className="flex-shrink-0 w-20 pl-3 ml-1 border-l border-gray-100 text-xs text-gray-400 leading-relaxed">
-                  {order.call_time && <div>{new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</div>}
-                  {order.scheduled_date && <div>{new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}</div>}
-                  {lastDelivery && <div>上次 {daysAgoLabel(lastDelivery.created_at)}</div>}
                 </div>
               </div>
               {/* 展開區塊 */}
