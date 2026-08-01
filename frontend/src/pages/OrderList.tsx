@@ -60,6 +60,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [orders, setOrders] = useState<Order[]>([])
   const [returnsMap, setReturnsMap] = useState<Record<number, any[]>>({})
   const [summary, setSummary] = useState<any>(null)
+  const [counts, setCounts] = useState<any>(null)
   const [filter, setFilter] = useState('ALL')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<number | null>(null)
@@ -104,9 +105,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
       } else if (filter !== 'ALL') {
         params.status = filter
       }
-      const [res, sum] = await Promise.all([api.getOrders(params), api.getTodaySummary()])
+      const [res, sum, cnt] = await Promise.all([api.getOrders(params), api.getTodaySummary(), api.getOrderCounts()])
       setOrders(res.orders)
       setSummary(sum)
+      setCounts(cnt)
       const customerIds = [...new Set(res.orders.map((o: any) => o.customer_id))]
       const map: Record<number, any[]> = {}
       await Promise.all(customerIds.map(async (cid: any) => {
@@ -612,11 +614,16 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         </div>
       )}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {['ALL','PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => (
+        {['ALL','PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => {
+          const countKey = s === 'ALL' ? 'all' : s === 'PENDING' ? 'pending' : s === 'DELIVERING' ? 'delivering' : s === 'DELIVERED' ? 'delivered' : 'scheduled'
+          const count = counts?.[countKey]
+          return (
           <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
             {s === 'ALL' ? '全部' : s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
+            {count != null && <span className="ml-1 opacity-70">{count}</span>}
           </button>
-        ))}
+          )
+        })}
         <button onClick={load} className="flex-shrink-0 px-3 py-1.5 rounded-full text-sm bg-gray-100 text-gray-600">🔄</button>
         {pending.length > 0 && (
           <button
@@ -736,8 +743,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
-              <div className="hidden lg:flex items-center gap-3 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="w-28 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
+              <div className="hidden lg:flex items-center gap-2 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
+                <div className="w-24 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     {selectMode && (
                       <input
@@ -748,17 +755,16 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         className="w-5 h-5 accent-orange-500 flex-shrink-0"
                       />
                     )}
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {order.scheduled_date
-                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                    <span className="text-xs text-gray-400">
+                      {order.scheduled_date
+                        ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                        : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                    </span>
                   </div>
                   {order.status === 'PENDING' && !isFutureScheduled(order) && (
                     <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
                       className="w-full h-9 px-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
-                      🚛 開始配送
+                      開始配送
                     </button>
                   )}
                   {order.status === 'PENDING' && isFutureScheduled(order) && (
@@ -792,12 +798,12 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     📍{order.customer_address}
                   </a>
                 </div>
-                <div className="w-32 flex-shrink-0 font-semibold text-gray-800 truncate">
+                <div className="flex-shrink-0 font-semibold text-gray-800 whitespace-nowrap">
                   {order.items && order.items.length > 0
                     ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
                     : `${order.quantity} 桶`}
                 </div>
-                <div className="w-28 flex-shrink-0 pr-2 overflow-hidden">
+                <div className="flex-shrink-0 min-w-0 max-w-[120px]">
                   <div className="font-bold text-gray-800 truncate">${Number(order.total_amount).toLocaleString()}</div>
                   {order.payment_type === 'AR' && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>

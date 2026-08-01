@@ -5,6 +5,19 @@ import { db } from '../lib/db'
 // 不能被「只看今天」的預設日期限制擋住，否則昨天以前沒送出去的單會憑空消失
 const ACTIVE_STATUSES = ['PENDING', 'ASSIGNED', 'DELIVERING']
 
+export async function getOrderCounts(_req: Request, res: Response) {
+  const [rows] = await db.query(
+    `SELECT
+      SUM(CASE WHEN DATE(COALESCE(scheduled_date, created_at)) = CURDATE() THEN 1 ELSE 0 END) as \`all\`,
+      SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN status = 'DELIVERING' THEN 1 ELSE 0 END) as delivering,
+      SUM(CASE WHEN status = 'DELIVERED' AND DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as delivered,
+      SUM(CASE WHEN scheduled_date IS NOT NULL AND scheduled_date > CURDATE() THEN 1 ELSE 0 END) as scheduled
+     FROM orders`
+  ) as any
+  res.json(rows[0])
+}
+
 export async function listOrders(req: Request, res: Response) {
   const { status, date, customerId, customerSearch, limit = '200', all, upcoming } = req.query
   const conditions: string[] = []

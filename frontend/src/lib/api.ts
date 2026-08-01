@@ -67,6 +67,7 @@ export const api = {
     return request(`/orders?${q}`)
   },
   getTodaySummary: () => request('/orders/summary'),
+  getOrderCounts: () => request('/orders/counts'),
   getPredictions: () => request('/predictions'),
   getLineInquiries: (status?: string) => request(`/line/inquiries${status ? `?status=${status}` : ''}`),
   handleLineInquiry: (id: number) => request(`/line/inquiries/${id}/handle`, { method: 'PATCH' }),
