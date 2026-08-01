@@ -737,7 +737,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div className="hidden lg:flex items-center gap-3 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="w-24 flex-shrink-0">
+                <div className="w-28 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     {selectMode && (
                       <input
@@ -750,11 +750,26 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     )}
                     <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
+                  <div className="text-xs text-gray-400">
                     {order.scheduled_date
                       ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
                       : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
                   </div>
+                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
+                    <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
+                      className="w-full h-9 px-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
+                      🚛 開始配送
+                    </button>
+                  )}
+                  {order.status === 'PENDING' && isFutureScheduled(order) && (
+                    <div className="w-full h-9 px-2 flex items-center justify-center bg-gray-50 text-gray-400 text-xs font-medium rounded-lg whitespace-nowrap">⏳ 未到配送日</div>
+                  )}
+                  {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
+                    <button onClick={e => { e.stopPropagation(); markDelivered(order) }} disabled={actionId === order.id}
+                      className="w-full h-9 px-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
+                      ✅ 完成送達
+                    </button>
+                  )}
                 </div>
                 <div className="w-48 flex-shrink-0 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -782,27 +797,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
                     : `${order.quantity} 桶`}
                 </div>
-                <div className="w-24 flex-shrink-0">
-                  <div className="font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
+                <div className="w-28 flex-shrink-0 pr-2 overflow-hidden">
+                  <div className="font-bold text-gray-800 truncate">${Number(order.total_amount).toLocaleString()}</div>
                   {order.payment_type === 'AR' && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-red-50 text-red-600">📒 欠帳</span>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-shrink-0 ml-auto" onClick={e => e.stopPropagation()}>
-                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
-                      className="h-11 px-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
-                      🚛 開始配送
-                    </button>
-                  )}
-                  {order.status === 'PENDING' && isFutureScheduled(order) && (
-                    <div className="h-11 px-4 flex items-center bg-gray-50 text-gray-400 text-sm font-medium rounded-lg whitespace-nowrap">⏳ 尚未到配送日</div>
-                  )}
-                  {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                    <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
-                      className="h-11 px-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
-                      ✅ 完成送達
-                    </button>
                   )}
                 </div>
               </div>
