@@ -16,6 +16,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('orders')
   const [orderRefresh, setOrderRefresh] = useState(0)
   const [customerEditId, setCustomerEditId] = useState<number | null>(null)
+  const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export default function App() {
 
   function handleEditCustomer(customerId: number) {
     setCustomerEditId(customerId)
-    setPage('customers')
+    setCustomerModalOpen(true)
   }
 
   const navItems: { key: Page; label: string; icon: string }[] = [
@@ -80,6 +81,19 @@ export default function App() {
         {page === 'customers' && <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />}
         {page === 'report' && <ReportPage onEditCustomer={handleEditCustomer} />}
       </div>
+
+      {/* 從訂單/報表頁點「編輯客戶」時，用彈窗顯示，不跳頁 */}
+      {customerModalOpen && page !== 'customers' && (
+        <div className="fixed inset-0 bg-black/50 z-40 overflow-y-auto">
+          <div className="bg-gray-50 min-h-screen">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center z-10">
+              <span className="font-bold text-gray-800">編輯客戶</span>
+              <button onClick={() => { setCustomerModalOpen(false); setCustomerEditId(null) }} className="text-gray-400 text-2xl leading-none">×</button>
+            </div>
+            <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />
+          </div>
+        </div>
+      )}
 
       {/* Bottom Nav */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex z-10">

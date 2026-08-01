@@ -61,7 +61,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [returnsMap, setReturnsMap] = useState<Record<number, any[]>>({})
   const [summary, setSummary] = useState<any>(null)
   const [counts, setCounts] = useState<any>(null)
-  const [filter, setFilter] = useState('ALL')
+  const [filter, setFilter] = useState('PENDING')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<number | null>(null)
   const [returnModal, setReturnModal] = useState<{orderId: number, customerId: number, customerName: string} | null>(null)
@@ -614,13 +614,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         </div>
       )}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {['ALL','PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => {
-          const countKey = s === 'ALL' ? 'all' : s === 'PENDING' ? 'pending' : s === 'DELIVERING' ? 'delivering' : s === 'DELIVERED' ? 'delivered' : 'scheduled'
+        {['PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => {
+          const countKey = s === 'PENDING' ? 'pending' : s === 'DELIVERING' ? 'delivering' : s === 'DELIVERED' ? 'delivered' : 'scheduled'
           const count = counts?.[countKey]
           return (
           <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {s === 'ALL' ? '全部' : s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
-            {s !== 'ALL' && count != null && <span className="ml-1 opacity-70">{count}</span>}
+            {s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
+            {count != null && <span className="ml-1 opacity-70">{count}</span>}
           </button>
           )
         })}
@@ -655,7 +655,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           {pending.map(order => {
             const lastDelivery = getLastDelivery(order)
             return (
-            <div key={order.id} className={`bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
+            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 lg:border-l-2 ${STATUS_BORDER[order.status]} rounded-xl p-4 lg:py-2.5 lg:px-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
               {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
               <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
@@ -744,6 +744,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               </div>
               {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
               <div className="hidden lg:flex items-center gap-2 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
+                <span className="hidden lg:block absolute top-2 right-3 text-xs text-gray-400">
+                  {order.scheduled_date
+                    ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                    : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                </span>
                 <div className="w-24 flex-shrink-0 space-y-1" onClick={e => selectMode && e.stopPropagation()}>
                   {selectMode && (
                     <input
@@ -769,11 +774,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       ✅ 完成送達
                     </button>
                   )}
-                  <div className="text-xs text-gray-400 text-center">
-                    {order.scheduled_date
-                      ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
-                      : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
-                  </div>
                 </div>
                 <div className="w-48 flex-shrink-0 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -796,10 +796,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     📍{order.customer_address}
                   </a>
                 </div>
-                <div className="flex-1 min-w-0 font-semibold text-gray-800 truncate">
+                <div className="flex-1 min-w-0 flex flex-wrap gap-x-1.5 gap-y-0 font-semibold text-gray-800 text-sm">
                   {order.items && order.items.length > 0
-                    ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
-                    : `${order.quantity} 桶`}
+                    ? order.items.map((i: any, idx: number) => <span key={idx} className="whitespace-nowrap">{GAS_LABELS[i.gas_type]}×{i.quantity}</span>)
+                    : <span className="whitespace-nowrap">{order.quantity} 桶</span>}
                 </div>
                 <div className="flex-shrink-0">
                   <div className="font-bold text-gray-800 whitespace-nowrap">${Number(order.total_amount).toLocaleString()}</div>
