@@ -649,8 +649,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             const lastDelivery = getLastDelivery(order)
             return (
             <div key={order.id} className={`bg-white border border-gray-200 border-l-4 ${STATUS_BORDER[order.status]} rounded-xl p-4 shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`}>
-              {/* 卡片主體 - 點擊展開（多選模式下改成點擊勾選） */}
-              <div className="cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
+              {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
+              <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="flex items-start gap-2 min-w-0">
                     {selectMode && (
@@ -734,6 +734,80 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   </div>
                 )}
                 <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
+              </div>
+              {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
+              <div className="hidden lg:flex items-center gap-4 cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(order.id)}
+                      onChange={() => toggleSelectOrder(order.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="w-5 h-5 accent-orange-500"
+                    />
+                  )}
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
+                </div>
+                <div className="min-w-[170px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-gray-800">{order.customer_name}</span>
+                    {onEditCustomer && (
+                      <button
+                        onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                        className="text-xs text-blue-500"
+                        title="編輯客戶資料"
+                      >✏️</button>
+                    )}
+                  </div>
+                  <a
+                    href={mapsUrl(order.customer_address)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    className="text-xs text-gray-500 hover:text-blue-600 truncate block max-w-[220px]"
+                  >
+                    📍{order.customer_address}
+                  </a>
+                </div>
+                <div className="min-w-[140px] font-semibold text-gray-800">
+                  {order.items && order.items.length > 0
+                    ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')
+                    : `${order.quantity} 桶`}
+                </div>
+                <div className="min-w-[90px]">
+                  <div className="font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                    {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
+                  </span>
+                </div>
+                <div className="min-w-[60px] text-xs text-gray-400">
+                  {order.scheduled_date
+                    ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+                    : (order.call_time ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }) : '')}
+                </div>
+                <div className="flex-1" />
+                <div className="flex gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => cancelOrder(order.id)} disabled={actionId === order.id}
+                    className="h-11 px-4 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium rounded-lg transition">
+                    取消
+                  </button>
+                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
+                    <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
+                      className="h-11 px-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
+                      🚛 開始配送
+                    </button>
+                  )}
+                  {order.status === 'PENDING' && isFutureScheduled(order) && (
+                    <div className="h-11 px-4 flex items-center bg-gray-50 text-gray-400 text-sm font-medium rounded-lg whitespace-nowrap">⏳ 尚未到配送日</div>
+                  )}
+                  {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
+                    <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
+                      className="h-11 px-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
+                      ✅ 完成送達
+                    </button>
+                  )}
+                </div>
               </div>
               {/* 展開區塊 */}
               {expandedId === order.id && (
@@ -834,9 +908,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   </button>
                 </div>
               )}
-              {/* 操作按鈕 */}
-              {/* 操作按鈕 */}
-              <div className="flex gap-2 mt-3">
+              {/* 操作按鈕（僅直向卡片使用，橫向已內嵌於單行列） */}
+              <div className="lg:hidden flex gap-2 mt-3">
                 <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
                   className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
                   取消
