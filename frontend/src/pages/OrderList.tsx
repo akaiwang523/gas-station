@@ -60,7 +60,9 @@ function daysAgoLabel(dateStr: string) {
 function isFutureScheduled(order: { scheduled_date: string | null }) {
   if (!order.scheduled_date) return false
   const sched = String(order.scheduled_date).slice(0, 10)
-  const today = new Date().toISOString().slice(0, 10)
+  // 用 toISOString() 抓「今天」是 UTC 日期，跟 scheduled_date（台北時間的日期）比較，
+  // 在台北時間凌晨 0~8 點（UTC 還是前一天）會把「今天就該配送」的單誤判成「還沒到配送日」
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
   return sched > today
 }
 export default function OrderList({ refresh, onEditCustomer }: { refresh?: number; onEditCustomer?: (customerId: number) => void }) {

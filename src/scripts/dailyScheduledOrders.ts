@@ -34,14 +34,8 @@ interface FixedCustomer {
   price_override: number | null
 }
 
-function isoWeekday(date: Date): number {
-  // JS getDay(): 0=Sun..6=Sat -> 轉成 1=Mon..7=Sun
-  const d = date.getDay()
-  return d === 0 ? 7 : d
-}
-
-function isFirstOccurrenceOfWeekdayThisMonth(date: Date): boolean {
-  return date.getDate() <= 7
+function isFirstOccurrenceOfWeekdayThisMonth(dayOfMonth: number): boolean {
+  return dayOfMonth <= 7
 }
 
 // delivery_day 可能是單一星期幾("3")或逗號分隔多個星期幾("1,4")，統一解析成數字陣列
@@ -54,9 +48,15 @@ function parseDeliveryDays(deliveryDay: string | null): number[] {
 }
 
 export async function runDailyScheduledOrders() {
-  const today = new Date()
-  const todayWeekday = isoWeekday(today)
-  const todayStr = today.toISOString().slice(0, 10) // YYYY-MM-DD
+  // 這支排程是設定在台北時間早上 6 點跑（UTC+8 的 06:00 = UTC 前一天 22:00）。
+  // 用 new Date() 直接算「今天」會拿到執行環境（Zeabur 容器，通常是 UTC）的日期/星期，
+  // 這個時間點 UTC 那邊其實還是「前一天」，導致每次排程都用錯的星期幾去比對固定配送日，
+  // 固定配送客戶會系統性地晚一天觸發。這裡改用 Intl 直接在台北時區算出今天的日期字串跟星期幾。
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()) // YYYY-MM-DD
+  const todayDayOfMonth = Number(todayStr.slice(8, 10))
+  const WEEKDAY_MAP: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }
+  const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', weekday: 'short' }).format(new Date())
+  const todayWeekday = WEEKDAY_MAP[weekdayName]
 
   console.log(`[dailyScheduledOrders] 開始執行，今天日期: ${todayStr}, 星期: ${todayWeekday}`)
 
@@ -88,7 +88,7 @@ export async function runDailyScheduledOrders() {
     const days = parseDeliveryDays(c.delivery_day)
     if (!days.includes(todayWeekday)) return false
     if (c.delivery_cycle === 'WEEKLY') return true
-    if (c.delivery_cycle === 'MONTHLY_FIXED') return isFirstOccurrenceOfWeekdayThisMonth(today)
+    if (c.delivery_cycle === 'MONTHLY_FIXED') return isFirstOccurrenceOfWeekdayThisMonth(todayDayOfMonth)
     return false
   })
 
@@ -104,9 +104,11 @@ export async function runDailyScheduledOrders() {
 
   for (const customer of dueToday) {
     // 防止同一支腳本同一天對同一客戶重複建單（例如排程意外重跑）
+    // created_at 存的是 UTC，這裡要用 CONVERT_TZ 轉台北時區再跟 todayStr（台北日期）比較，
+    // 否則兩邊日期基準不一致，又會回到同一種時區判斷錯誤
     const [existing] = await db.query(
       `SELECT id FROM customer_events
-       WHERE customer_id = ? AND event_type = 'AUTO_SCHEDULED_ORDER' AND DATE(created_at) = ?`,
+       WHERE customer_id = ? AND event_type = 'AUTO_SCHEDULED_ORDER' AND DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = ?`,
       [customer.id, todayStr]
     ) as any
     if (existing[0]) {
