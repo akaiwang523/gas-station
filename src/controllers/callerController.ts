@@ -125,10 +125,15 @@ export async function incomingCall(req: Request, res: Response) {
   // 原本只檢查 DRAFT 狀態，漏掉了「已經確認成待送、但還沒出貨」這個常見情況。
   // 限制在「當天」是刻意的：如果哪張單忘記點完成、卡了好幾天，不會因此讓之後
   // 每一次來電都硬要沿用那張過期的舊單，跨天就當成新需求重新開一張
-  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+  // 注意：created_at 存的是 UTC，「當天」一定要用 CONVERT_TZ 轉成台北時區再比較日期——
+  // 原本用 JS 算出的台北日期字串去比對 MySQL 端 UTC 的 DATE(created_at)，
+  // 在台北時間凌晨 0~8 點（UTC 還是前一天）會整段判斷失效，導致這幾個小時內
+  // 同一客戶每通來電都判定成「今天還沒有單」，重複建出好幾筆單
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
-    [c.id, todayStr]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING')
+     AND DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+     ORDER BY created_at DESC LIMIT 1`,
+    [c.id]
   ) as any
 
   let draftId: number
@@ -425,10 +430,12 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
   )
 
   // 同一客戶「今天」若還有一筆尚未送達的單，直接沿用，不重複建立（跟主流程一致）
-  const todayStr1 = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+  // 同樣要用 CONVERT_TZ 轉台北時區比較，理由同上（避免凌晨時段誤判）
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
-    [customerId, todayStr1]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING')
+     AND DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+     ORDER BY created_at DESC LIMIT 1`,
+    [customerId]
   ) as any
 
   if (existingDrafts[0]) {
@@ -485,10 +492,12 @@ export async function incomingCallById(req: Request, res: Response) {
   const c = rows[0]
 
   // 同一客戶「今天」若還有一筆尚未送達的單，直接沿用，不重複建立（跟主流程一致）
-  const todayStr2 = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+  // 同樣要用 CONVERT_TZ 轉台北時區比較，理由同上（避免凌晨時段誤判）
   const [existingDrafts] = await db.query(
-    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING') AND DATE(created_at) = ? ORDER BY created_at DESC LIMIT 1`,
-    [c.id, todayStr2]
+    `SELECT id FROM orders WHERE customer_id = ? AND status IN ('DRAFT','PENDING','ASSIGNED','DELIVERING')
+     AND DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+     ORDER BY created_at DESC LIMIT 1`,
+    [c.id]
   ) as any
 
   if (existingDrafts[0]) {
