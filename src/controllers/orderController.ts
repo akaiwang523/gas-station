@@ -233,7 +233,7 @@ export async function collectPayment(req: Request, res: Response) {
       )
     }
 
-    await conn.query(`UPDATE orders SET status = 'DELIVERED' WHERE id = ?`, [orderId])
+    await conn.query(`UPDATE orders SET status = 'DELIVERED', delivered_at = NOW() WHERE id = ?`, [orderId])
 
     await conn.commit()
     res.json({ ok: true })
