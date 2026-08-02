@@ -41,7 +41,12 @@ export async function listOrders(req: Request, res: Response) {
       conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = ?')
       params.push(date)
     } else if (!customerSearch && !all && status !== 'DRAFT' && !ACTIVE_STATUSES.includes(String(status))) {
-      conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = CURDATE()')
+      if (status === 'DELIVERED') {
+        // 已完成分頁要跟 getOrderCounts 的統計口徑一致：用「今天完成」而非「今天建立/預約」判斷
+        conditions.push('DATE(o.delivered_at) = CURDATE()')
+      } else {
+        conditions.push('DATE(COALESCE(o.scheduled_date, o.created_at)) = CURDATE()')
+      }
     }
   }
 
