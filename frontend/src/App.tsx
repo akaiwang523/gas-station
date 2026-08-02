@@ -88,7 +88,7 @@ export default function App() {
           <div className="bg-gray-50 min-h-screen">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center z-10">
               <span className="font-bold text-gray-800">編輯客戶</span>
-              <button onClick={() => { setCustomerModalOpen(false); setCustomerEditId(null) }} className="text-gray-400 text-2xl leading-none">×</button>
+              <button onClick={() => { setCustomerModalOpen(false); setCustomerEditId(null); setOrderRefresh(r => r + 1) }} className="text-gray-400 text-2xl leading-none">×</button>
             </div>
             <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />
           </div>
