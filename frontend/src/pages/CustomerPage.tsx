@@ -46,7 +46,7 @@ const DELIVERY_CYCLE_LABEL: Record<string, string> = {
   FLOW_METER: '流量計',
 }
 
-export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openEditId?: number | null; onOpenEditConsumed?: () => void } = {}) {
+export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEditOnly, onQuickEditClose }: { openEditId?: number | null; onOpenEditConsumed?: () => void; quickEditOnly?: boolean; onQuickEditClose?: () => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -72,6 +72,11 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
     setDeliveryDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
   }
 
+  function closeForm() {
+    setShowForm(false)
+    if (quickEditOnly) onQuickEditClose?.()
+  }
+
   async function load() {
     setLoading(true)
     try {
@@ -82,7 +87,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { if (!quickEditOnly) load() }, [])
 
   // 從訂單頁點「編輯客戶」跳轉過來時，直接抓該客戶資料並打開編輯視窗
   useEffect(() => {
@@ -165,8 +170,8 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
       } else {
         await api.createCustomer(data)
       }
-      setShowForm(false)
-      await load()
+      closeForm()
+      if (!quickEditOnly) await load()
     } finally {
       setSaving(false)
     }
@@ -220,6 +225,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
 
   return (
     <div className="max-w-lg mx-auto p-4 space-y-4">
+      {!quickEditOnly && (
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-gray-800">👥 客戶管理</h2>
         <div className="flex gap-2">
@@ -229,8 +235,9 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
           <button onClick={openAdd} className="bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-medium">+ 新增</button>
         </div>
       </div>
+      )}
 
-      {mergeMode && (
+      {!quickEditOnly && mergeMode && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-2">
           <div className="text-sm text-orange-700">
             已選 {selectedForMerge.length}/2 筆{selectedForMerge.length < 2 ? '，點選要合併的兩筆客戶卡片' : '，可以預覽合併了'}
@@ -245,6 +252,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
         </div>
       )}
 
+      {!quickEditOnly && (
       <div className="flex gap-2">
         <input
           className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
@@ -255,10 +263,11 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
         />
         <button onClick={load} className="px-4 py-2.5 bg-orange-500 text-white rounded-xl font-medium">搜尋</button>
       </div>
+      )}
 
-      {loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
+      {!quickEditOnly && loading && <div className="text-center text-gray-400 py-8">載入中...</div>}
 
-      {!loading && customers.map(c => (
+      {!quickEditOnly && !loading && customers.map(c => (
         <div
           key={c.id}
           onClick={() => mergeMode && toggleSelectForMerge(c.id)}
@@ -308,17 +317,17 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed }: { openE
         </div>
       ))}
 
-      {!loading && customers.length === 0 && (
+      {!quickEditOnly && !loading && customers.length === 0 && (
         <div className="text-center text-gray-400 py-12">找不到客戶</div>
       )}
 
       {/* 新增/編輯 Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={() => setShowForm(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={closeForm}>
           <div className="bg-white w-full max-w-lg mx-auto rounded-t-2xl p-6 space-y-3 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-lg font-bold">{editId ? '編輯客戶' : '新增客戶'}</h3>
-              <button onClick={() => setShowForm(false)} className="text-gray-400 text-2xl">×</button>
+              <button onClick={closeForm} className="text-gray-400 text-2xl">×</button>
             </div>
 
             {[

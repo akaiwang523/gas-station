@@ -82,17 +82,14 @@ export default function App() {
         {page === 'report' && <ReportPage onEditCustomer={handleEditCustomer} />}
       </div>
 
-      {/* 從訂單/報表頁點「編輯客戶」時，用彈窗顯示，不跳頁 */}
+      {/* 從訂單/報表頁點「編輯客戶」時，只彈出編輯表單，訂單頁維持在背景，不整頁跳轉 */}
       {customerModalOpen && page !== 'customers' && (
-        <div className="fixed inset-0 bg-black/50 z-40 overflow-y-auto">
-          <div className="bg-gray-50 min-h-screen">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center z-10">
-              <span className="font-bold text-gray-800">編輯客戶</span>
-              <button onClick={() => { setCustomerModalOpen(false); setCustomerEditId(null); setOrderRefresh(r => r + 1) }} className="text-gray-400 text-2xl leading-none">×</button>
-            </div>
-            <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />
-          </div>
-        </div>
+        <CustomerPage
+          openEditId={customerEditId}
+          onOpenEditConsumed={() => setCustomerEditId(null)}
+          quickEditOnly
+          onQuickEditClose={() => { setCustomerModalOpen(false); setCustomerEditId(null); setOrderRefresh(r => r + 1) }}
+        />
       )}
 
       {/* Bottom Nav */}

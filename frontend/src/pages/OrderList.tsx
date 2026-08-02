@@ -73,10 +73,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [filter, setFilter] = useState('PENDING')
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<number | null>(null)
-  // 訂單卡片上直接改客戶姓名（例如把「來電 xxxxxxxxx」改成真名），不跳頁不開彈窗
-  const [editingNameCustomerId, setEditingNameCustomerId] = useState<number | null>(null)
-  const [editingNameValue, setEditingNameValue] = useState('')
-  const [savingName, setSavingName] = useState(false)
   const [returnModal, setReturnModal] = useState<{orderId: number, customerId: number, customerName: string} | null>(null)
   const [returnKg, setReturnKg] = useState('')
   const [returnAction, setReturnAction] = useState('RECORD')
@@ -165,29 +161,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   useEffect(() => { load() }, [filter, refresh])
   useEffect(() => { api.getBaselinePrices().then(res => setBaselinePrices(res.prices || {})).catch(() => {}) }, [])
   // 取得某筆訂單「上一次」的配送紀錄（排除自己）
-  function startEditName(order: Order) {
-    setEditingNameCustomerId(order.customer_id)
-    setEditingNameValue(order.customer_name)
-  }
-  function cancelEditName() {
-    setEditingNameCustomerId(null)
-    setEditingNameValue('')
-  }
-  async function saveEditName(customerId: number) {
-    const name = editingNameValue.trim()
-    if (!name) { cancelEditName(); return }
-    setSavingName(true)
-    try {
-      await api.updateCustomer(customerId, { name })
-      // 直接更新本地訂單列表裡的客戶姓名，不用整頁重新整理就能立刻看到
-      setOrders(prev => prev.map(o => o.customer_id === customerId ? { ...o, customer_name: name } : o))
-    } catch (e) {
-      alert('更新客戶姓名失敗，請稍後再試')
-    } finally {
-      setSavingName(false)
-      cancelEditName()
-    }
-  }
   function getLastDelivery(order: Order) {
     const hist = customerHistory[order.customer_id]
     if (!hist) return null
@@ -713,36 +686,13 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {editingNameCustomerId === order.customer_id ? (
-                          <input
-                            autoFocus
-                            value={editingNameValue}
-                            disabled={savingName}
-                            onClick={e => e.stopPropagation()}
-                            onChange={e => setEditingNameValue(e.target.value)}
-                            onBlur={() => saveEditName(order.customer_id)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') { e.currentTarget.blur() }
-                              if (e.key === 'Escape') { cancelEditName() }
-                            }}
-                            className="font-bold text-gray-800 text-lg border-b border-blue-400 outline-none min-w-0"
-                          />
-                        ) : (
-                          <>
-                            <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
-                            <button
-                              onClick={e => { e.stopPropagation(); startEditName(order) }}
-                              className="text-xs text-blue-500"
-                              title="改客戶姓名"
-                            >✏️</button>
-                            {onEditCustomer && (
-                              <button
-                                onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                                className="text-xs text-gray-400"
-                                title="編輯完整客戶資料"
-                              >⋯</button>
-                            )}
-                          </>
+                        <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
+                        {onEditCustomer && (
+                          <button
+                            onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                            className="text-xs text-blue-500"
+                            title="編輯客戶資料"
+                          >✏️</button>
                         )}
                       </div>
                       <a
@@ -832,39 +782,15 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       {rowStatus.label}
                     </span>
                     <div className="flex items-center gap-1.5 min-w-0">
-                      {editingNameCustomerId === order.customer_id ? (
-                        <input
-                          autoFocus
-                          value={editingNameValue}
-                          disabled={savingName}
-                          onClick={e => e.stopPropagation()}
-                          onChange={e => setEditingNameValue(e.target.value)}
-                          onBlur={() => saveEditName(order.customer_id)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') { e.currentTarget.blur() }
-                            if (e.key === 'Escape') { cancelEditName() }
-                          }}
-                          style={{ fontSize: 16, fontWeight: 600 }}
-                          className="border-b border-blue-400 outline-none min-w-0 text-gray-900"
-                        />
-                      ) : (
-                        <>
-                          <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
-                          <button
-                            onClick={e => { e.stopPropagation(); startEditName(order) }}
-                            className="text-gray-400 hover:text-blue-500 flex-shrink-0"
-                            title="改客戶姓名"
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                          </button>
-                          {onEditCustomer && (
-                            <button
-                              onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                              className="text-gray-400 hover:text-blue-500 flex-shrink-0"
-                              title="編輯完整客戶資料"
-                            >⋯</button>
-                          )}
-                        </>
+                      <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
+                      {onEditCustomer && (
+                        <button
+                          onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
+                          className="text-gray-400 hover:text-blue-500 flex-shrink-0"
+                          title="編輯客戶資料"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                        </button>
                       )}
                     </div>
                     <a
