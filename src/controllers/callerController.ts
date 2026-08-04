@@ -191,8 +191,8 @@ export async function incomingCall(req: Request, res: Response) {
     const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
 
     const [result] = await db.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
-       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?, NOW())`,
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time, source)
+       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?, NOW(), 'CALLER')`,
       [c.id, totalQuantity, avgUnitPrice, totalAmount, `來電自動草稿 ${normalized}`]
     ) as any
 
@@ -448,8 +448,8 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
-     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電綁定既有客戶草稿', COALESCE(?, NOW()))`,
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time, source)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電綁定既有客戶草稿', COALESCE(?, NOW()), 'CALLER')`,
     [customerId, quantity, unitPrice, totalAmount, callTime]
   ) as any
 
@@ -510,8 +510,8 @@ export async function incomingCallById(req: Request, res: Response) {
   const totalAmount = quantity * unitPrice
 
   const [result] = await db.query(
-    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time)
-     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電草稿', COALESCE(?, NOW()))`,
+    `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time, source)
+     VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', '陌生來電草稿', COALESCE(?, NOW()), 'CALLER')`,
     [c.id, quantity, unitPrice, totalAmount, callTime]
   ) as any
 

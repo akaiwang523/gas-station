@@ -125,8 +125,8 @@ export async function createOrder(req: Request, res: Response) {
     }
 
     const [result] = await conn.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, scheduled_date, call_time)
-       VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, COALESCE(?, NOW()))`,
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, scheduled_date, call_time, source)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, COALESCE(?, NOW()), 'MANUAL')`,
       [customerId, totalQuantity, gasTotal / totalQuantity, totalAmount, note || null, paymentType, finalScheduledDate, finalCallTime]
     ) as any
 

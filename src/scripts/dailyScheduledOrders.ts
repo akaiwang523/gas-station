@@ -138,8 +138,8 @@ export async function runDailyScheduledOrders() {
       await conn.beginTransaction()
 
       const [result] = await conn.query(
-        `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)
-         VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH')`,
+        `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source)
+         VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'SCHEDULED')`,
         [customer.id, quantity, unitPrice, totalAmount, '系統自動建立(固定配送排程)']
       ) as any
       const orderId = result.insertId

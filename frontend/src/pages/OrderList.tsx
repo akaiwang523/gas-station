@@ -16,7 +16,20 @@ type Order = {
   scheduled_date: string | null
   call_time: string | null
   created_at: string
+  source: string | null
   items: any[]
+}
+// 訂單來源小標籤：目前只標 LINE（使用者最在意的區分），
+// CALLER/SCHEDULED/MANUAL 已有別的方式看得出來（來電草稿區塊、已排定標籤等），先不加字重複
+function SourceBadge({ source }: { source: string | null | undefined }) {
+  if (source !== 'LINE') return null
+  return (
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap flex-shrink-0"
+      style={{ background: '#DCFCE7', color: '#15803D' }}
+      title="LINE 官方帳號預訂"
+    >💬 LINE</span>
+  )
 }
 const STATUS_LABEL: Record<string, string> = {
   PENDING: '待派送', ASSIGNED: '已指派', DELIVERING: '配送中',
@@ -687,6 +700,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
+                        <SourceBadge source={order.source} />
                         {onEditCustomer && (
                           <button
                             onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -783,6 +797,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     </span>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
+                      <SourceBadge source={order.source} />
                       {onEditCustomer && (
                         <button
                           onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -1009,6 +1024,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               <div className="flex justify-between items-start cursor-pointer" onClick={() => toggleExpand(order)}>
                 <div>
                   <span className="font-medium text-gray-600">{order.customer_name}</span>
+                  <SourceBadge source={order.source} />
                   {onEditCustomer && (
                     <button
                       onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}

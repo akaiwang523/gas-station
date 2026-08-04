@@ -421,8 +421,8 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
   try {
     await conn.beginTransaction()
     const [result] = await conn.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type)
-       VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH')`,
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'LINE')`,
       [customerId, qty, unitPrice, totalAmount, `LINE預訂 / ${timeSlot}`]
     ) as any
     const orderId = result.insertId
