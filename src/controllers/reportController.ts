@@ -14,10 +14,11 @@ export async function getHotspots(req: Request, res: Response) {
     // only_full_group_by 不會自動判斷函式之間的相依性，兩個運算式都要放進 GROUP BY，
     // 不然會直接噴錯——這支查詢每次載入報表頁都會呼叫，噴錯若沒被 catch 到會讓整個服務當機重開
     const [daily] = await db.query(
-      `SELECT DATE(created_at) as d, DAYOFWEEK(created_at) as dow, COUNT(*) as cnt, SUM(quantity) as cyl
+      `SELECT DATE(COALESCE(scheduled_date, created_at)) as d,
+              DAYOFWEEK(COALESCE(scheduled_date, created_at)) as dow, COUNT(*) as cnt, SUM(quantity) as cyl
        FROM orders
-       WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND status != 'CANCELLED'
-       GROUP BY DATE(created_at), DAYOFWEEK(created_at)`,
+       WHERE COALESCE(scheduled_date, created_at) >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND status != 'CANCELLED'
+       GROUP BY DATE(COALESCE(scheduled_date, created_at)), DAYOFWEEK(COALESCE(scheduled_date, created_at))`,
       [days]
     ) as any
 
@@ -43,7 +44,7 @@ export async function getHotspots(req: Request, res: Response) {
          COUNT(*) as order_count, SUM(o.quantity) as cylinders
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
-       WHERE o.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND o.status != 'CANCELLED'
+       WHERE COALESCE(o.scheduled_date, o.created_at) >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND o.status != 'CANCELLED'
        GROUP BY district
        ORDER BY cylinders DESC`,
       [days]
@@ -62,6 +63,9 @@ export async function getHotspots(req: Request, res: Response) {
 
 // 今日快覽
 export async function getTodayReport(req: Request, res: Response) {
+  // 統計基準用「訂單歸屬日」= COALESCE(scheduled_date, created_at)，不是單純的建立時間——
+  // 預約單/補登的過去單，created_at 是建單當下，不代表這張單實際算哪一天，
+  // 跟 getOrderCounts 的 `all` 統計口徑保持一致
   const [summary] = await db.query(
     `SELECT 
       COUNT(*) as total_orders,
@@ -72,7 +76,7 @@ export async function getTodayReport(req: Request, res: Response) {
       SUM(CASE WHEN status = 'PENDING' OR status = 'DELIVERING' THEN 1 ELSE 0 END) as pending_count,
       SUM(CASE WHEN status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered_count
      FROM orders
-     WHERE DATE(created_at) = CURDATE() AND status != 'CANCELLED'`
+     WHERE DATE(COALESCE(scheduled_date, created_at)) = CURDATE() AND status != 'CANCELLED'`
   ) as any
 
   res.json(summary[0])
@@ -83,6 +87,12 @@ export async function getMonthReport(req: Request, res: Response) {
   const { month } = req.query
   const targetMonth = month || new Date().toISOString().slice(0, 7)
 
+  // 全部改用「訂單歸屬日」COALESCE(scheduled_date, created_at) 而不是 created_at：
+  // 1) 預約單的 created_at 是預約當下建立的時間，不是實際算哪一天
+  // 2) 這裡刻意不要求 status='DELIVERED'／不看 delivered_at——
+  //    試營運期間常有訂單忘記按「已完成」，若報表依賴 delivered_at 會直接漏算整筆，
+  //    現有邏輯本來就只排除 CANCELLED，維持這點即可涵蓋「忘記標記完成」的單
+
   // 月份總計
   const [summary] = await db.query(
     `SELECT 
@@ -92,7 +102,7 @@ export async function getMonthReport(req: Request, res: Response) {
       SUM(CASE WHEN payment_type = 'AR' THEN total_amount ELSE 0 END) as ar_amount,
       SUM(total_amount) as total_amount
      FROM orders
-     WHERE DATE_FORMAT(created_at, '%Y-%m') = ? AND status != 'CANCELLED'`,
+     WHERE DATE_FORMAT(COALESCE(scheduled_date, created_at), '%Y-%m') = ? AND status != 'CANCELLED'`,
     [targetMonth]
   ) as any
 
@@ -101,7 +111,7 @@ export async function getMonthReport(req: Request, res: Response) {
     `SELECT oi.gas_type, SUM(oi.quantity) as qty, SUM(oi.subtotal) as amount
      FROM order_items oi
      JOIN orders o ON o.id = oi.order_id
-     WHERE DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'
+     WHERE DATE_FORMAT(COALESCE(o.scheduled_date, o.created_at), '%Y-%m') = ? AND o.status != 'CANCELLED'
      GROUP BY oi.gas_type`,
     [targetMonth]
   ) as any
@@ -109,13 +119,13 @@ export async function getMonthReport(req: Request, res: Response) {
   // 每日訂單數和金額
   const [daily] = await db.query(
     `SELECT 
-      DAY(created_at) as day,
+      DAY(COALESCE(scheduled_date, created_at)) as day,
       COUNT(*) as orders,
       SUM(total_amount) as amount,
       SUM(quantity) as cylinders
      FROM orders
-     WHERE DATE_FORMAT(created_at, '%Y-%m') = ? AND status != 'CANCELLED'
-     GROUP BY DAY(created_at)
+     WHERE DATE_FORMAT(COALESCE(scheduled_date, created_at), '%Y-%m') = ? AND status != 'CANCELLED'
+     GROUP BY DAY(COALESCE(scheduled_date, created_at))
      ORDER BY day ASC`,
     [targetMonth]
   ) as any
@@ -134,7 +144,7 @@ export async function getMonthReport(req: Request, res: Response) {
       SUM(o.quantity) as cylinders, SUM(o.total_amount) as amount
      FROM orders o
      JOIN customers c ON c.id = o.customer_id
-     WHERE DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'
+     WHERE DATE_FORMAT(COALESCE(o.scheduled_date, o.created_at), '%Y-%m') = ? AND o.status != 'CANCELLED'
      GROUP BY o.customer_id, c.name, c.phone
      ORDER BY amount DESC
      LIMIT 5`,
@@ -158,16 +168,16 @@ export async function exportCsv(req: Request, res: Response) {
 
   const [orders] = await db.query(
     `SELECT 
-      o.id, DATE(o.created_at) as date, c.name as customer, c.phone,
+      o.id, DATE(COALESCE(o.scheduled_date, o.created_at)) as date, c.name as customer, c.phone,
       c.address, o.quantity, o.unit_price, o.total_amount,
       o.payment_type, o.status, o.note,
       GROUP_CONCAT(CONCAT(oi.gas_type,'x',oi.quantity) SEPARATOR '+') as items
      FROM orders o
      JOIN customers c ON c.id = o.customer_id
      LEFT JOIN order_items oi ON oi.order_id = o.id
-     WHERE DATE_FORMAT(o.created_at, '%Y-%m') = ? AND o.status != 'CANCELLED'
+     WHERE DATE_FORMAT(COALESCE(o.scheduled_date, o.created_at), '%Y-%m') = ? AND o.status != 'CANCELLED'
      GROUP BY o.id
-     ORDER BY o.created_at ASC`,
+     ORDER BY COALESCE(o.scheduled_date, o.created_at) ASC`,
     [targetMonth]
   ) as any
 

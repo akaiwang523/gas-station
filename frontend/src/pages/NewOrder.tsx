@@ -399,17 +399,20 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         </div>
       </div>
 
-      {/* 預約配送日（留空＝今天） */}
+      {/* 配送日期（留空＝今天；選未來日期＝排定；選過去日期＝補登漏單） */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">預約配送日（選填，留空＝今天）</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">配送日期（選填，留空＝今天）</label>
         <input
           type="date"
           className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
           value={scheduledDate}
           onChange={e => setScheduledDate(e.target.value)}
         />
-        {scheduledDate && (
+        {scheduledDate && scheduledDate > new Date().toLocaleDateString('en-CA') && (
           <div className="text-orange-500 text-xs mt-1.5">⚠️ 此單將排定於 {scheduledDate}，在那天之前不會出現在待派送佇列</div>
+        )}
+        {scheduledDate && scheduledDate < new Date().toLocaleDateString('en-CA') && (
+          <div className="text-blue-500 text-xs mt-1.5">📅 補登單，會立即出現在待送清單，報表歸入 {scheduledDate}</div>
         )}
       </div>
 
