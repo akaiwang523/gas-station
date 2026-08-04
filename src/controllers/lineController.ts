@@ -96,8 +96,49 @@ function quantityMenu(gasType: string) {
   }
 }
 
+// 日期選單：今天/明天/後天，讓 LINE 訂單也能像來電草稿一樣預約未來的配送日
+const DATE_CHOICE_OFFSET: Record<string, number> = { today: 0, tomorrow: 1, dayafter: 2 }
+const DATE_CHOICE_LABEL: Record<string, string> = { today: '今天', tomorrow: '明天', dayafter: '後天' }
+
+// 用 Asia/Taipei 時區算出「今天 + N 天」的日期字串（YYYY-MM-DD）
+function taipeiDateString(daysOffset: number): string {
+  const taipeiNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
+  taipeiNow.setDate(taipeiNow.getDate() + daysOffset)
+  const y = taipeiNow.getFullYear()
+  const m = String(taipeiNow.getMonth() + 1).padStart(2, '0')
+  const d = String(taipeiNow.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+// dateChoice ('today'/'tomorrow'/'dayafter') 轉換成實際要存進 orders.scheduled_date 的值 + 顯示用文字
+// today 存 null（跟其他管道一樣代表「今天，不特別排定」），tomorrow/dayafter 存實際日期字串
+function resolveDateChoice(dateChoice: string): { scheduledDate: string | null, label: string } {
+  const offset = DATE_CHOICE_OFFSET[dateChoice] ?? 0
+  const dateStr = taipeiDateString(offset)
+  const [, m, d] = dateStr.split('-')
+  const label = `${DATE_CHOICE_LABEL[dateChoice] || '今天'} ${Number(m)}/${Number(d)}`
+  return { scheduledDate: offset === 0 ? null : dateStr, label }
+}
+
+function dateMenu(gasType: string, qty: number) {
+  return {
+    type: 'template',
+    altText: '請選擇配送日期',
+    template: {
+      type: 'buttons',
+      title: '選擇配送日期',
+      text: '請選擇希望的配送日期',
+      actions: [
+        { type: 'postback', label: '今天', data: `action=date&type=${gasType}&qty=${qty}&date=today` },
+        { type: 'postback', label: '明天', data: `action=date&type=${gasType}&qty=${qty}&date=tomorrow` },
+        { type: 'postback', label: '後天', data: `action=date&type=${gasType}&qty=${qty}&date=dayafter` }
+      ]
+    }
+  }
+}
+
 // 時段選單
-function timeSlotMenu(gasType: string, qty: number) {
+function timeSlotMenu(gasType: string, qty: number, dateChoice: string) {
   return {
     type: 'template',
     altText: '請選擇配送時段',
@@ -106,10 +147,10 @@ function timeSlotMenu(gasType: string, qty: number) {
       title: '選擇配送時段',
       text: '請選擇希望的配送時段',
       actions: [
-        { type: 'postback', label: '上午 9-12 點', data: `action=timeslot&type=${gasType}&qty=${qty}&slot=上午9-12點` },
-        { type: 'postback', label: '下午 12-17 點', data: `action=timeslot&type=${gasType}&qty=${qty}&slot=下午12-17點` },
-        { type: 'postback', label: '傍晚 17-20 點', data: `action=timeslot&type=${gasType}&qty=${qty}&slot=傍晚17-20點` },
-        { type: 'postback', label: '指定時間', data: `action=timeslot_custom&type=${gasType}&qty=${qty}` }
+        { type: 'postback', label: '上午 9-12 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=上午9-12點` },
+        { type: 'postback', label: '下午 12-17 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=下午12-17點` },
+        { type: 'postback', label: '傍晚 17-20 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=傍晚17-20點` },
+        { type: 'postback', label: '指定時間', data: `action=timeslot_custom&type=${gasType}&qty=${qty}&date=${dateChoice}` }
       ]
     }
   }
@@ -203,16 +244,17 @@ export async function handleLineWebhook(req: Request, res: Response) {
           continue
         }
         const gasType = userState[userId].gasType
-        userState[userId] = { step: 'waiting_timeslot', gasType, qty }
-        await replyMessage(replyToken, [timeSlotMenu(gasType, qty)])
+        userState[userId] = { step: 'waiting_date_select', gasType, qty }
+        await replyMessage(replyToken, [dateMenu(gasType, qty)])
         continue
       }
 
       // 等待自訂時間
       if (userState[userId]?.step === 'waiting_time') {
-        const { gasType, qty } = userState[userId]
+        const { gasType, qty, dateChoice } = userState[userId]
         userState[userId] = {}
-        await createLineOrder(userId, replyToken, gasType, qty, `指定時間：${text}`)
+        const { scheduledDate, label } = resolveDateChoice(dateChoice)
+        await createLineOrder(userId, replyToken, gasType, qty, `${label} 指定時間：${text}`, scheduledDate)
         continue
       }
 
@@ -259,8 +301,8 @@ export async function handleLineWebhook(req: Request, res: Response) {
       else if (action === 'quantity') {
         const gasType = params.get('type')!
         const qty = parseInt(params.get('qty')!)
-        userState[userId] = { step: 'waiting_timeslot', gasType, qty }
-        await replyMessage(replyToken, [timeSlotMenu(gasType, qty)])
+        userState[userId] = { step: 'waiting_date_select', gasType, qty }
+        await replyMessage(replyToken, [dateMenu(gasType, qty)])
       }
 
       else if (action === 'quantity_custom') {
@@ -269,18 +311,29 @@ export async function handleLineWebhook(req: Request, res: Response) {
         await replyMessage(replyToken, [{ type: 'text', text: '請輸入您需要的桶數：' }])
       }
 
+      else if (action === 'date') {
+        const gasType = params.get('type')!
+        const qty = parseInt(params.get('qty')!)
+        const dateChoice = params.get('date')!
+        userState[userId] = {}
+        await replyMessage(replyToken, [timeSlotMenu(gasType, qty, dateChoice)])
+      }
+
       else if (action === 'timeslot') {
         const gasType = params.get('type')!
         const qty = parseInt(params.get('qty')!)
         const slot = params.get('slot')!
+        const dateChoice = params.get('date') || 'today'
         userState[userId] = {}
-        await createLineOrder(userId, replyToken, gasType, qty, slot)
+        const { scheduledDate, label } = resolveDateChoice(dateChoice)
+        await createLineOrder(userId, replyToken, gasType, qty, `${label} ${slot}`, scheduledDate)
       }
 
       else if (action === 'timeslot_custom') {
         const gasType = params.get('type')!
         const qty = parseInt(params.get('qty')!)
-        userState[userId] = { step: 'waiting_time', gasType, qty }
+        const dateChoice = params.get('date') || 'today'
+        userState[userId] = { step: 'waiting_time', gasType, qty, dateChoice }
         await replyMessage(replyToken, [{ type: 'text', text: '請輸入希望的配送時間（例如：17:00）：' }])
       }
 
@@ -398,7 +451,7 @@ export async function handleLineWebhook(req: Request, res: Response) {
   }
 }
 
-async function createLineOrder(userId: string, replyToken: string, gasType: string, qty: number, timeSlot: string) {
+async function createLineOrder(userId: string, replyToken: string, gasType: string, qty: number, timeSlot: string, scheduledDate: string | null = null) {
   const [binding] = await db.query(
     `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
   ) as any
@@ -421,9 +474,9 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
   try {
     await conn.beginTransaction()
     const [result] = await conn.query(
-      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source)
-       VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'LINE')`,
-      [customerId, qty, unitPrice, totalAmount, `LINE預訂 / ${timeSlot}`]
+      `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source, scheduled_date)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'LINE', ?)`,
+      [customerId, qty, unitPrice, totalAmount, `LINE預訂 / ${timeSlot}`, scheduledDate]
     ) as any
     const orderId = result.insertId
     await conn.query(
