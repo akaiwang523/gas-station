@@ -16,20 +16,7 @@ type Order = {
   scheduled_date: string | null
   call_time: string | null
   created_at: string
-  source: string | null
   items: any[]
-}
-// 訂單來源小標籤：目前只標 LINE（使用者最在意的區分），
-// CALLER/SCHEDULED/MANUAL 已有別的方式看得出來（來電草稿區塊、已排定標籤等），先不加字重複
-function SourceBadge({ source }: { source: string | null | undefined }) {
-  if (source !== 'LINE') return null
-  return (
-    <span
-      className="text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap flex-shrink-0"
-      style={{ background: '#DCFCE7', color: '#15803D' }}
-      title="LINE 官方帳號預訂"
-    >💬 LINE</span>
-  )
 }
 const STATUS_LABEL: Record<string, string> = {
   PENDING: '待派送', ASSIGNED: '已指派', DELIVERING: '配送中',
@@ -295,18 +282,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     setActionId(id)
     try { await api.cancelOrder(id); await load() }
     finally { setActionId(null) }
-  }
-  // 當日沒送到的訂單改期到明天：只改 scheduled_date，品項/金額不變
-  async function postponeToTomorrow(order: Order) {
-    if (!window.confirm(`確定要把 ${order.customer_name} 這筆訂單延到明天嗎？`)) return
-    setActionId(order.id)
-    try {
-      const t = new Date()
-      t.setDate(t.getDate() + 1)
-      const dateStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
-      await api.rescheduleOrder(order.id, dateStr)
-      await load()
-    } finally { setActionId(null) }
   }
   async function deleteOrder(id: number) {
     if (!window.confirm('確定要刪除這筆訂單嗎？刪除後無法復原。')) return
@@ -712,7 +687,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
-                        <SourceBadge source={order.source} />
                         {onEditCustomer && (
                           <button
                             onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -809,7 +783,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     </span>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
-                      <SourceBadge source={order.source} />
                       {onEditCustomer && (
                         <button
                           onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -993,12 +966,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
                     {editLoading ? '儲存中...' : '💾 儲存修改'}
                   </button>
-                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <button onClick={e => { e.stopPropagation(); postponeToTomorrow(order) }} disabled={actionId === order.id}
-                      className="w-full border border-purple-300 text-purple-600 hover:bg-purple-50 disabled:opacity-50 text-sm font-medium py-2 rounded-lg transition">
-                      📅 延到明天
-                    </button>
-                  )}
                   <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
                     className="hidden lg:block w-full text-center text-sm text-gray-400 hover:text-red-500 py-1.5">
                     取消此筆訂單
@@ -1042,7 +1009,6 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               <div className="flex justify-between items-start cursor-pointer" onClick={() => toggleExpand(order)}>
                 <div>
                   <span className="font-medium text-gray-600">{order.customer_name}</span>
-                  <SourceBadge source={order.source} />
                   {onEditCustomer && (
                     <button
                       onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
