@@ -296,6 +296,18 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     try { await api.cancelOrder(id); await load() }
     finally { setActionId(null) }
   }
+  // 當日沒送到的訂單改期到明天：只改 scheduled_date，品項/金額不變
+  async function postponeToTomorrow(order: Order) {
+    if (!window.confirm(`確定要把 ${order.customer_name} 這筆訂單延到明天嗎？`)) return
+    setActionId(order.id)
+    try {
+      const t = new Date()
+      t.setDate(t.getDate() + 1)
+      const dateStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+      await api.rescheduleOrder(order.id, dateStr)
+      await load()
+    } finally { setActionId(null) }
+  }
   async function deleteOrder(id: number) {
     if (!window.confirm('確定要刪除這筆訂單嗎？刪除後無法復原。')) return
     setActionId(id)
@@ -981,6 +993,12 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
                     {editLoading ? '儲存中...' : '💾 儲存修改'}
                   </button>
+                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
+                    <button onClick={e => { e.stopPropagation(); postponeToTomorrow(order) }} disabled={actionId === order.id}
+                      className="w-full border border-purple-300 text-purple-600 hover:bg-purple-50 disabled:opacity-50 text-sm font-medium py-2 rounded-lg transition">
+                      📅 延到明天
+                    </button>
+                  )}
                   <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
                     className="hidden lg:block w-full text-center text-sm text-gray-400 hover:text-red-500 py-1.5">
                     取消此筆訂單

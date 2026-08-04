@@ -104,6 +104,8 @@ export const api = {
     request(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   cancelOrder: (id: number) =>
     request(`/orders/${id}/cancel`, { method: 'PATCH' }),
+  rescheduleOrder: (id: number, scheduledDate: string | null) =>
+    request(`/orders/${id}/reschedule`, { method: 'PATCH', body: JSON.stringify({ scheduledDate }) }),
   deleteOrder: (id: number) =>
     request(`/orders/${id}`, { method: 'DELETE' }),
   confirmDraft: (id: number, data: { paymentType?: string; items?: { gasType: string; quantity: number; unitPrice: number }[]; scheduledDate?: string; note?: string }) =>

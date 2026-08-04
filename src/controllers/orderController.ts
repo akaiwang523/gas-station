@@ -324,6 +324,21 @@ export async function deleteOrder(req: Request, res: Response) {
   res.json({ ok: true })
 }
 
+// 把一筆未送達的訂單改期（例如今天沒送到、延到明天再送），只動 scheduled_date，不動品項/金額
+export async function rescheduleOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  const { scheduledDate } = req.body // 'YYYY-MM-DD'；沒傳或空字串代表清除排定日（=改回今天）
+  const finalScheduledDate = scheduledDate && String(scheduledDate).trim() ? scheduledDate : null
+  const [result] = await db.query(
+    'UPDATE orders SET scheduled_date = ? WHERE id = ?',
+    [finalScheduledDate, id]
+  ) as any
+  if (result.affectedRows === 0) {
+    return res.status(404).json({ error: '訂單不存在' })
+  }
+  res.json({ ok: true, scheduledDate: finalScheduledDate })
+}
+
 export async function updateOrder(req: Request, res: Response) {
   const id = Number(req.params.id)
   const { items, note, paymentType } = req.body
