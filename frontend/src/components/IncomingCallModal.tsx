@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { api } from '../lib/api'
-import { showToast } from '../lib/toast'
 
 const POLL_INTERVAL = 4000
 
@@ -134,55 +133,32 @@ export default function IncomingCallModal() {
     return () => clearInterval(timer)
   }, [token, poll])
 
-  // deferred=true 對應「稍後派單」：不等派單 API 回應完成，立刻關閉這個彈窗、
-  // 檢查佇列裡下一筆草稿，讓派單在背景跑完，成功/失敗都改用全域 toast 通知——
-  // 因為這個彈窗是蓋住整個畫面的 fixed overlay，卡在等待回應時完全擋住底下的訂單列表
-  async function performConfirm(deferred: boolean) {
+  // 這支訂單維持在資料庫的 DRAFT 狀態，不打任何 API——只是把彈窗關掉，
+  // 讓你晚點自己去「訂單」頁的「來電草稿（待確認）」清單挑時間處理，
+  // 跟預測清單「不自動推播、要自己點」是同一種設計
+  function handleDefer() {
     if (!draft) return
+    setVisible(false)
+    // shownDraftId 保持不變：這筆草稿狀態沒有改變，之後輪詢還是會抓到同一筆，
+    // 但因為 id 沒變就不會被判定成「新草稿」而重新跳出彈窗
+  }
 
-    const snapshot = {
-      draftId: draft.id,
-      customerId: draft.customer.id,
-      customerName: draft.customer.name,
-      paymentType, editItems: editItems.map(i => ({ ...i })), scheduledDate, rememberPrice,
-    }
-    const totalQty = snapshot.editItems.reduce((s, i) => s + i.quantity, 0)
-
-    async function doConfirm() {
-      await fetch(`/api/caller/draft/${snapshot.draftId}/confirm`, {
+  async function handleConfirm() {
+    if (!draft) return
+    setLoading(true)
+    try {
+      await fetch(`/api/caller/draft/${draft.id}/confirm`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ paymentType: snapshot.paymentType, items: snapshot.editItems, scheduledDate: snapshot.scheduledDate })
+        body: JSON.stringify({ paymentType, items: editItems, scheduledDate })
       })
       // 「記住這個單價」：只在單一規格時出現這個選項（避免多規格客戶被單一數字誤蓋掉）
-      if (snapshot.rememberPrice && snapshot.editItems.length === 1) {
-        try { await api.updateCustomer(snapshot.customerId, { price_override: snapshot.editItems[0].unitPrice }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+      if (rememberPrice && editItems.length === 1) {
+        try { await api.updateCustomer(draft.customer.id, { price_override: editItems[0].unitPrice }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
       }
-    }
-
-    if (deferred) {
-      setVisible(false)
-      setDraft(null)
-      shownDraftId.current = null
-      setRememberPrice(false)
-      poll()
-      doConfirm()
-        .then(() => {
-          showToast(`✅ 已派單：${snapshot.customerName} × ${totalQty} 桶`, 'success')
-          window.dispatchEvent(new Event('order-refresh'))
-        })
-        .catch((e: any) => {
-          showToast(`❌ 派單失敗（${snapshot.customerName}）：${e.message || '請重新確認後手動補建'}`, 'error')
-        })
-      return
-    }
-
-    setLoading(true)
-    try {
-      await doConfirm()
       setVisible(false)
       setDraft(null)
       shownDraftId.current = null
@@ -194,9 +170,6 @@ export default function IncomingCallModal() {
       setLoading(false)
     }
   }
-
-  const handleConfirm = () => performConfirm(false)
-  const handleDeferredConfirm = () => performConfirm(true)
 
   async function handleCancel() {
     if (!draft) return
@@ -585,9 +558,9 @@ export default function IncomingCallModal() {
             取消派單
           </button>
           <button
-            onClick={handleDeferredConfirm}
+            onClick={handleDefer}
             disabled={loading}
-            title="不用等回應，立刻關閉並檢查下一筆，派單在背景處理"
+            title="先擱著，之後到「訂單」頁的「來電草稿」清單再手動處理"
             className="px-3 py-3 rounded-xl bg-gray-100 text-gray-500 font-medium text-xs whitespace-nowrap"
           >
             📤 稍後
