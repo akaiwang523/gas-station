@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
+import { showToast } from '../lib/toast'
 
 type Customer = {
   id: number
@@ -188,47 +189,75 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setRememberPrice(false)
   }
 
-  async function handleSubmit() {
-    setLoading(true)
+  // deferred=true 對應「稍後建單」：不等 API 回應完成，立刻清空表單、回到訂單列表，
+  // 讓建單請求在背景跑完，成功/失敗都改用全域 toast 通知——因為使用者這時多半已經
+  // 切到別的分頁在看訂單列表了，這個頁面自己的 success/error local state 不會被看到
+  async function performSubmit(deferred: boolean) {
     setError('')
-    try {
-      let customerId: number
 
-      if (isNew) {
-        if (!newName || !newPhone || !newAddress) {
-          setError('請填寫新客戶的姓名、電話和地址')
-          setLoading(false)
-          return
-        }
-        if (!newCustomerType) {
-          setError('請選擇客戶類型（營業用／一般住家），這會影響之後的預測補貨提醒')
-          setLoading(false)
-          return
-        }
-        const res = await api.createCustomer({
-          name: newName, phone: newPhone, address: newAddress, gasType: 'BOTTLED_20KG',
-          customerType: newCustomerType,
-        })
-        customerId = res.id
-      } else if (selected) {
-        customerId = selected.id
-      } else {
-        setError('請選擇客戶或填寫新客戶資料')
-        setLoading(false)
+    if (isNew) {
+      if (!newName || !newPhone || !newAddress) {
+        setError('請填寫新客戶的姓名、電話和地址')
         return
       }
+      if (!newCustomerType) {
+        setError('請選擇客戶類型（營業用／一般住家），這會影響之後的預測補貨提醒')
+        return
+      }
+    } else if (!selected) {
+      setError('請選擇客戶或填寫新客戶資料')
+      return
+    }
 
-      const totalNote = [note, stairFee > 0 ? `樓梯費$${stairFee}` : ''].filter(Boolean).join('、')
-      await api.createOrder({ customerId, items, stairFee, paymentType, note: totalNote, scheduledDate, callTime })
+    // 先把這次送出當下的表單內容存成快照——deferred 模式會在 API 回應前就呼叫 reset()，
+    // 之後背景執行的 doCreate() 不能再去讀當下（可能已經被清空/被下一筆訂單覆蓋）的 state
+    const snapshot = {
+      isNew, newName, newPhone, newAddress, newCustomerType,
+      selectedId: selected?.id, selectedName: selected?.name,
+      items: items.map(i => ({ ...i })), stairFee, paymentType, scheduledDate, callTime,
+      note, rememberPrice,
+    }
+    const totalNote = [snapshot.note, snapshot.stairFee > 0 ? `樓梯費$${snapshot.stairFee}` : ''].filter(Boolean).join('、')
+    const totalQty = snapshot.items.reduce((s, i) => s + i.quantity, 0)
+    const name = snapshot.isNew ? snapshot.newName : snapshot.selectedName!
+
+    async function doCreate() {
+      let customerId: number
+      if (snapshot.isNew) {
+        const res = await api.createCustomer({
+          name: snapshot.newName, phone: snapshot.newPhone, address: snapshot.newAddress, gasType: 'BOTTLED_20KG',
+          customerType: snapshot.newCustomerType,
+        })
+        customerId = res.id
+      } else {
+        customerId = snapshot.selectedId!
+      }
+      await api.createOrder({ customerId, items: snapshot.items, stairFee: snapshot.stairFee, paymentType: snapshot.paymentType, note: totalNote, scheduledDate: snapshot.scheduledDate, callTime: snapshot.callTime })
 
       // 「記住這個價格」：只在單一規格時才會出現這個選項（避免多規格客戶被單一數字誤蓋掉），
       // 勾選的話，建單同時把這次的單價存成客戶的特殊單價，之後就會自動帶入，不用再跑一趟客戶頁面改
-      if (rememberPrice && items.length === 1) {
-        try { await api.updateCustomer(customerId, { price_override: items[0].unit_price }) } catch { /* 訂單已經建立成功，這步失敗就算了，不影響本次接單 */ }
+      if (snapshot.rememberPrice && snapshot.items.length === 1) {
+        try { await api.updateCustomer(customerId, { price_override: snapshot.items[0].unit_price }) } catch { /* 訂單已經建立成功，這步失敗就算了，不影響本次接單 */ }
       }
+    }
 
-      const name = isNew ? newName : selected!.name
-      const totalQty = items.reduce((s, i) => s + i.quantity, 0)
+    if (deferred) {
+      reset()
+      onOrderCreated?.()
+      doCreate()
+        .then(() => {
+          showToast(`✅ 已建單：${name} × ${totalQty} 桶`, 'success')
+          window.dispatchEvent(new Event('order-refresh'))
+        })
+        .catch((e: any) => {
+          showToast(`❌ 建單失敗（${name}）：${e.message || '請重新確認後手動補建'}`, 'error')
+        })
+      return
+    }
+
+    setLoading(true)
+    try {
+      await doCreate()
       setSuccess(`✅ 已建單：${name} × ${totalQty} 桶`)
       onOrderCreated?.()
       reset()
@@ -239,6 +268,9 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       setLoading(false)
     }
   }
+
+  const handleSubmit = () => performSubmit(false)
+  const handleDeferredSubmit = () => performSubmit(true)
 
   const gasTotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const total = gasTotal + stairFee
@@ -464,9 +496,19 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         </div>
       </div>
 
-      <button onClick={handleSubmit} disabled={loading || (!selected && !isNew)} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition">
-        {loading ? '建單中...' : '✅ 建立訂單'}
-      </button>
+      <div className="flex gap-2">
+        <button onClick={handleSubmit} disabled={loading || (!selected && !isNew)} className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition">
+          {loading ? '建單中...' : '✅ 建立訂單'}
+        </button>
+        <button
+          onClick={handleDeferredSubmit}
+          disabled={loading || (!selected && !isNew)}
+          title="不用等回應，立刻回到訂單列表，建單在背景處理"
+          className="px-4 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-600 font-medium py-4 rounded-xl text-sm transition whitespace-nowrap"
+        >
+          📤 稍後建單
+        </button>
+      </div>
     </div>
   )
 }

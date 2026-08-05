@@ -7,6 +7,7 @@ import ReportPage from './pages/ReportPage'
 import CustomerPage from './pages/CustomerPage'
 import IncomingCallModal from './components/IncomingCallModal'
 import BaselinePriceSettings from './components/BaselinePriceSettings'
+import ToastContainer from './components/ToastContainer'
 import './index.css'
 
 type Page = 'orders' | 'new' | 'ar' | 'customers' | 'report'
@@ -49,6 +50,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      <ToastContainer />
       <IncomingCallModal />
 
       {/* Header */}
