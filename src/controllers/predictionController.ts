@@ -66,6 +66,34 @@ export async function getPredictions(req: Request, res: Response) {
       const lastOrderTime = new Date(orders[0].created_at).getTime()
       if (dismissedAt[customer.id] && dismissedAt[customer.id] >= lastOrderTime) continue
 
+      // 預測準確度追蹤：把「上一輪還沒兌現的預測」拿去對這位客戶最新的訂單——
+      // 只要有一筆訂單是在那筆預測產生之後才成立的，就當作是這筆預測被「兌現」了，
+      // 回填 actual_order_id/actual_order_date，之後才能算「預測日 vs 實際下單日」的誤差。
+      // 純粹背景記錄用，不影響下面任何預測顯示邏輯。
+      try {
+        const [unresolved] = await db.query(
+          `SELECT id, predicted_at FROM prediction_history WHERE customer_id = ? AND actual_order_id IS NULL`,
+          [customer.id]
+        ) as any
+        for (const row of unresolved as any[]) {
+          const [fulfilling] = await db.query(
+            `SELECT id, created_at FROM orders
+             WHERE customer_id = ? AND status != 'CANCELLED' AND created_at > ?
+             ORDER BY created_at ASC LIMIT 1`,
+            [customer.id, row.predicted_at]
+          ) as any
+          if (fulfilling[0]) {
+            await db.query(
+              `UPDATE prediction_history SET actual_order_id = ?, actual_order_date = DATE(?) WHERE id = ?`,
+              [fulfilling[0].id, fulfilling[0].created_at, row.id]
+            )
+          }
+        }
+      } catch (trackErr) {
+        // 追蹤記錄失敗不該影響預測功能本身照常運作
+        console.error('[getPredictions] prediction_history resolve failed', trackErr)
+      }
+
       let daysPerBottle: number
       let confidence: 'default' | 'low' | 'normal'
       let sampleSize = 0
@@ -146,6 +174,25 @@ export async function getPredictions(req: Request, res: Response) {
           `SELECT gas_type, quantity, unit_price FROM order_items WHERE order_id = ?`,
           [lastOrder.id]
         ) as any
+
+        // 預測準確度追蹤：這一輪（自上次訂單之後）如果還沒記錄過，就記一筆。
+        // 用「是否已有未兌現的記錄」判斷是否為新一輪，避免同一輪因為前端重複打 API 而重複寫入。
+        try {
+          const [existingOpen] = await db.query(
+            `SELECT id FROM prediction_history WHERE customer_id = ? AND actual_order_id IS NULL LIMIT 1`,
+            [customer.id]
+          ) as any
+          if ((existingOpen as any[]).length === 0) {
+            await db.query(
+              `INSERT INTO prediction_history
+                 (customer_id, predicted_date, predicted_at, days_per_bottle, last_order_quantity, confidence_tier)
+               VALUES (?, ?, NOW(), ?, ?, ?)`,
+              [customer.id, predictedDate.toISOString().slice(0, 10), daysPerBottle, lastQuantity, confidence]
+            )
+          }
+        } catch (trackErr) {
+          console.error('[getPredictions] prediction_history insert failed', trackErr)
+        }
         predictions.push({
           customerId: customer.id,
           customerName: customer.name,
