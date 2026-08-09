@@ -31,6 +31,7 @@ const CUSTOMER_TYPE_LABEL: Record<string, string> = {
 const GAS_TYPE_LABEL: Record<string, string> = {
   BOTTLED_20KG: '20kg桶裝',
   BOTTLED_16KG: '16kg桶裝',
+  BOTTLED_10KG: '10kg桶裝',
   BOTTLED_4KG: '4kg桶裝',
   PIPED: '管道瓦斯',
 }
@@ -46,6 +47,11 @@ const DELIVERY_CYCLE_LABEL: Record<string, string> = {
   FLOW_METER: '流量計',
 }
 
+const GAS_TYPE_OPTIONS = ['BOTTLED_20KG', 'BOTTLED_16KG', 'BOTTLED_10KG', 'BOTTLED_4KG'] as const
+
+type FixedItem = { gasType: string; quantity: string }
+const EMPTY_FIXED_ITEM: FixedItem = { gasType: 'BOTTLED_20KG', quantity: '' }
+
 export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEditOnly, onQuickEditClose }: { openEditId?: number | null; onOpenEditConsumed?: () => void; quickEditOnly?: boolean; onQuickEditClose?: () => void } = {}) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
@@ -59,6 +65,8 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
   })
   const [deliveryDays, setDeliveryDays] = useState<number[]>([])
   const [showFixedDelivery, setShowFixedDelivery] = useState(false)
+  // 固定配送品項：一位客戶可以設好幾種瓦斯類型各自的配送數量（例如 20kg 兩桶＋16kg 一桶）
+  const [fixedItems, setFixedItems] = useState<FixedItem[]>([{ ...EMPTY_FIXED_ITEM }])
   const [saving, setSaving] = useState(false)
   // 合併客戶功能：選兩筆客戶 -> 預覽兩邊資料 -> 選要保留哪一筆 -> 確認合併
   const [mergeMode, setMergeMode] = useState(false)
@@ -70,6 +78,16 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
 
   function toggleDeliveryDay(day: number) {
     setDeliveryDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort())
+  }
+
+  function updateFixedItem(idx: number, field: keyof FixedItem, value: string) {
+    setFixedItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+  }
+  function addFixedItem() {
+    setFixedItems(prev => [...prev, { ...EMPTY_FIXED_ITEM }])
+  }
+  function removeFixedItem(idx: number) {
+    setFixedItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)
   }
 
   function closeForm() {
@@ -95,7 +113,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
     (async () => {
       try {
         const c = await api.getCustomer(openEditId)
-        openEdit(c)
+        await openEdit(c)
       } catch {
         alert('找不到這筆客戶資料')
       } finally {
@@ -112,26 +130,40 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
     })
     setDeliveryDays([])
     setShowFixedDelivery(false)
+    setFixedItems([{ ...EMPTY_FIXED_ITEM }])
     setEditId(null)
     setShowForm(true)
   }
 
-  function openEdit(c: Customer) {
+  // 客戶清單那邊傳進來的 c 沒有 fixedItems（列表 API 沒 join 這張表），
+  // 這裡一律重新打一次 getCustomer 抓最新、完整的資料（含固定配送品項）
+  async function openEdit(c: Customer) {
+    let full: any = c
+    try {
+      full = await api.getCustomer(c.id)
+    } catch {
+      // 抓不到就退回用列表上現有的資料，至少基本欄位還能編輯
+    }
     setForm({
-      name: c.name, phone: c.phone, phone2: c.phone2 || '',
-      address: c.address, district: c.district || '',
-      gas_type: c.gas_type, customer_type: c.customer_type || 'UNKNOWN', price_override: c.price_override ? String(c.price_override) : '',
-      note: c.note || '',
-      delivery_cycle: c.delivery_cycle || 'ON_CALL',
-      default_order_quantity: c.default_order_quantity ? String(c.default_order_quantity) : '',
-      default_unit_price: c.default_unit_price ? String(c.default_unit_price) : '',
+      name: full.name, phone: full.phone, phone2: full.phone2 || '',
+      address: full.address, district: full.district || '',
+      gas_type: full.gas_type, customer_type: full.customer_type || 'UNKNOWN', price_override: full.price_override ? String(full.price_override) : '',
+      note: full.note || '',
+      delivery_cycle: full.delivery_cycle || 'ON_CALL',
+      default_order_quantity: full.default_order_quantity ? String(full.default_order_quantity) : '',
+      default_unit_price: full.default_unit_price ? String(full.default_unit_price) : '',
     })
     setDeliveryDays(
-      c.delivery_day
-        ? c.delivery_day.split(',').map(s => Number(s.trim())).filter(n => n >= 1 && n <= 7)
+      full.delivery_day
+        ? full.delivery_day.split(',').map((s: string) => Number(s.trim())).filter((n: number) => n >= 1 && n <= 7)
         : []
     )
-    setShowFixedDelivery(c.delivery_cycle === 'WEEKLY' || c.delivery_cycle === 'MONTHLY_FIXED')
+    setShowFixedDelivery(full.delivery_cycle === 'WEEKLY' || full.delivery_cycle === 'MONTHLY_FIXED')
+    setFixedItems(
+      full.fixedItems && full.fixedItems.length > 0
+        ? full.fixedItems.map((it: any) => ({ gasType: it.gasType, quantity: String(it.quantity) }))
+        : [{ ...EMPTY_FIXED_ITEM }]
+    )
     setEditId(c.id)
     setShowForm(true)
   }
@@ -147,23 +179,28 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
         gasType: form.gas_type,
       }
       if (showFixedDelivery) {
-        if (deliveryDays.length === 0 || !form.default_order_quantity) {
-          alert('啟用固定配送時，至少選擇一個配送星期，數量為必填')
+        const validItems = fixedItems
+          .map(it => ({ gasType: it.gasType, quantity: Number(it.quantity) }))
+          .filter(it => it.quantity > 0)
+        if (deliveryDays.length === 0 || validItems.length === 0) {
+          alert('啟用固定配送時，至少選擇一個配送星期，且至少要有一個品項填數量')
           setSaving(false)
           return
         }
         data.delivery_cycle = (form.delivery_cycle === 'WEEKLY' || form.delivery_cycle === 'MONTHLY_FIXED') ? form.delivery_cycle : 'WEEKLY'
         data.delivery_day = deliveryDays.join(',')
-        data.default_order_quantity = Number(form.default_order_quantity)
-        // 單價非必填：自動建單時會優先用「特殊單價」，沒設定就用目前的基準價，
-        // 這裡只有在你想讓這位固定配送客戶用一個「跟基準價、特殊單價都不同」的價格時才需要填
-        data.default_unit_price = form.default_unit_price ? Number(form.default_unit_price) : null
+        data.fixedItems = validItems
+        // default_order_quantity 保留寫入總桶數，只是給客戶列表那頁快速顯示用，
+        // 實際自動建單的品項/數量以 customer_fixed_items（fixedItems）為準
+        data.default_order_quantity = validItems.reduce((s, it) => s + it.quantity, 0)
+        data.default_unit_price = null
       } else {
         // 沒有啟用固定配送，強制清空相關欄位，避免殘留舊設定被排程誤判
         data.delivery_cycle = 'ON_CALL'
         data.delivery_day = null
         data.default_order_quantity = null
         data.default_unit_price = null
+        data.fixedItems = []
       }
       if (editId) {
         await api.updateCustomer(editId, data)
@@ -431,31 +468,39 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">每次配送桶數 *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        placeholder="例：2"
-                        value={form.default_order_quantity}
-                        onChange={e => setForm(prev => ({ ...prev, default_order_quantity: e.target.value }))}
-                      />
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">配送品項 *（可加多種瓦斯類型，例如 20kg 兩桶＋16kg 一桶）</label>
+                    <div className="space-y-2">
+                      {fixedItems.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <select
+                            className="flex-1 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.gasType}
+                            onChange={e => updateFixedItem(idx, 'gasType', e.target.value)}
+                          >
+                            {GAS_TYPE_OPTIONS.map(g => (
+                              <option key={g} value={g}>{GAS_TYPE_LABEL[g] || g}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="桶數"
+                            className="w-20 border border-gray-300 rounded-xl px-3 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-orange-400"
+                            value={item.quantity}
+                            onChange={e => updateFixedItem(idx, 'quantity', e.target.value)}
+                          />
+                          {fixedItems.length > 1 && (
+                            <button type="button" onClick={() => removeFixedItem(idx)} className="text-red-400 text-lg font-bold px-1">×</button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">每桶單價（選填）</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        placeholder="留空＝用特殊單價或基準價"
-                        value={form.default_unit_price}
-                        onChange={e => setForm(prev => ({ ...prev, default_unit_price: e.target.value }))}
-                      />
-                    </div>
+                    <button type="button" onClick={addFixedItem} className="mt-2 w-full border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-1.5 text-sm font-medium">
+                      + 新增品項
+                    </button>
                   </div>
-                  <p className="text-xs text-gray-400">系統每天會自動檢查，到了配送日會自動建立草稿訂單（待出貨），出貨前仍可調整數量。單價會優先用客戶的特殊單價，沒設定就用目前的基準價，這欄可以留空。</p>
+                  <p className="text-xs text-gray-400">系統每天會自動檢查，到了配送日會自動建立草稿訂單（待出貨），出貨前仍可調整數量。每個品項的單價會優先用客戶的特殊單價，沒設定就用該類型目前的基準價。</p>
                 </div>
               )}
             </div>

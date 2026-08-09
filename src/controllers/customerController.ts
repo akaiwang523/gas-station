@@ -33,14 +33,34 @@ export async function getCustomer(req: Request, res: Response) {
   ) as any
   if (!rows[0]) return res.status(404).json({ error: '客戶不存在' })
   const [orders] = await db.query('SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 10', [id]) as any
-  res.json({ ...rows[0], orders })
+  const [fixedItems] = await db.query(
+    'SELECT id, gas_type as gasType, quantity FROM customer_fixed_items WHERE customer_id = ? ORDER BY id ASC',
+    [id]
+  ) as any
+  res.json({ ...rows[0], orders, fixedItems })
+}
+
+// 固定配送品項整批換新：先刪掉這位客戶原本的品項，再依傳入的清單重新寫入，
+// 跟訂單品項（order_items）的「整批換新」是同一種寫法。傳空陣列或不是固定配送就等於清空
+async function replaceFixedItems(customerId: number, fixedItems: any) {
+  await db.query('DELETE FROM customer_fixed_items WHERE customer_id = ?', [customerId])
+  if (!Array.isArray(fixedItems)) return
+  for (const it of fixedItems) {
+    const gasType = it.gasType || it.gas_type
+    const quantity = Number(it.quantity)
+    if (!gasType || !quantity || quantity <= 0) continue
+    await db.query(
+      'INSERT INTO customer_fixed_items (customer_id, gas_type, quantity) VALUES (?, ?, ?)',
+      [customerId, gasType, quantity]
+    )
+  }
 }
 
 export async function createCustomer(req: Request, res: Response) {
   const {
     name, phone, address, district, note, deposit = 0, priceOverride,
     deliveryCycle = 'ON_CALL', deliveryDay, gasType = 'BOTTLED_20KG', customerType, cylindersHeld = 0,
-    default_order_quantity, default_unit_price,
+    default_order_quantity, default_unit_price, fixedItems,
   } = req.body
   const [result] = await db.query(
     `INSERT INTO customers
@@ -54,6 +74,9 @@ export async function createCustomer(req: Request, res: Response) {
   ) as any
   const customerId = result.insertId
   await db.query('INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed) VALUES (?, 0, 0)', [customerId])
+  if (deliveryCycle === 'WEEKLY' || deliveryCycle === 'MONTHLY_FIXED') {
+    await replaceFixedItems(customerId, fixedItems)
+  }
   res.status(201).json({ id: customerId, name, phone })
 }
 
@@ -68,9 +91,17 @@ export async function updateCustomer(req: Request, res: Response) {
     if (body[key] !== undefined) { updates.push(`${f} = ?`); params.push(body[key]) }
     else if (body[f] !== undefined) { updates.push(`${f} = ?`); params.push(body[f]) }
   }
-  if (!updates.length) return res.status(400).json({ error: '沒有要更新的欄位' })
-  params.push(id)
-  await db.query(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params)
+  if (updates.length) {
+    params.push(id)
+    await db.query(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params)
+  }
+  // fixedItems 有帶才處理：固定配送客戶（WEEKLY/MONTHLY_FIXED）整批換新品項；
+  // 取消固定配送（切回 ON_CALL）時，body 會帶空陣列或 delivery_cycle=ON_CALL，兩種都清空品項
+  if (body.fixedItems !== undefined) {
+    const cycle = body.delivery_cycle ?? body.deliveryCycle
+    await replaceFixedItems(id, cycle === 'WEEKLY' || cycle === 'MONTHLY_FIXED' ? body.fixedItems : [])
+  }
+  if (!updates.length && body.fixedItems === undefined) return res.status(400).json({ error: '沒有要更新的欄位' })
   res.json({ ok: true })
 }
 

@@ -34,6 +34,12 @@ interface FixedCustomer {
   price_override: number | null
 }
 
+interface FixedItem {
+  customer_id: number
+  gas_type: string
+  quantity: number
+}
+
 function isFirstOccurrenceOfWeekdayThisMonth(dayOfMonth: number): boolean {
   return dayOfMonth <= 7
 }
@@ -99,6 +105,21 @@ export async function runDailyScheduledOrders() {
     return
   }
 
+  // 固定配送客戶現在支援多品項（customer_fixed_items），一次撈出全部待處理客戶的品項，
+  // 依 customer_id 分組；查不到品項的客戶（還沒設定，或還停在舊版單一數量沒搬過資料）
+  // 就退回用客戶身上的 gas_type + default_order_quantity 當唯一品項，維持相容
+  const dueIds = dueToday.map((c) => c.id)
+  const placeholders = dueIds.map(() => '?').join(',')
+  const [itemRows] = await db.query(
+    `SELECT customer_id, gas_type, quantity FROM customer_fixed_items WHERE customer_id IN (${placeholders})`,
+    dueIds
+  ) as any
+  const itemsByCustomer = new Map<number, FixedItem[]>()
+  for (const row of itemRows as FixedItem[]) {
+    if (!itemsByCustomer.has(row.customer_id)) itemsByCustomer.set(row.customer_id, [])
+    itemsByCustomer.get(row.customer_id)!.push(row)
+  }
+
   let created = 0
   let skipped = 0
 
@@ -117,21 +138,33 @@ export async function runDailyScheduledOrders() {
       continue
     }
 
-    const quantity = customer.default_order_quantity
-    if (!quantity || quantity <= 0) {
-      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 未設定 default_order_quantity，略過，請手動建單`)
+    const items = itemsByCustomer.get(customer.id)
+      ?? (customer.default_order_quantity && customer.default_order_quantity > 0
+        ? [{ customer_id: customer.id, gas_type: customer.gas_type, quantity: customer.default_order_quantity }]
+        : [])
+
+    if (items.length === 0) {
+      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 沒有設定任何固定配送品項，略過，請手動建單`)
       skipped++
       continue
     }
 
-    const unitPrice = customer.price_override ?? baselinePrice[customer.gas_type] ?? customer.default_unit_price
-    if (unitPrice === null || unitPrice === undefined) {
-      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 抓不到任何單價依據（特殊單價/基準價/預設單價都沒有），略過，請手動建單`)
+    // 每個品項各自算單價：優先用客戶的特殊單價，沒有就用該瓦斯類型的目前基準價，
+    // 都沒有才退回客戶身上的 default_unit_price（舊版單一價格欄位，當最後備援）
+    const orderItems = items.map((it) => {
+      const unitPrice = customer.price_override ?? baselinePrice[it.gas_type] ?? customer.default_unit_price
+      return { gasType: it.gas_type, quantity: it.quantity, unitPrice }
+    })
+
+    if (orderItems.some((it) => it.unitPrice === null || it.unitPrice === undefined)) {
+      console.warn(`[dailyScheduledOrders] 客戶 ${customer.name}(#${customer.id}) 有品項抓不到任何單價依據（特殊單價/基準價/預設單價都沒有），略過，請手動建單`)
       skipped++
       continue
     }
 
-    const totalAmount = quantity * Number(unitPrice)
+    const totalQuantity = orderItems.reduce((s, it) => s + it.quantity, 0)
+    const totalAmount = orderItems.reduce((s, it) => s + it.quantity * Number(it.unitPrice), 0)
+    const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
 
     const conn = await db.getConnection()
     try {
@@ -140,14 +173,16 @@ export async function runDailyScheduledOrders() {
       const [result] = await conn.query(
         `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source)
          VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'SCHEDULED')`,
-        [customer.id, quantity, unitPrice, totalAmount, '系統自動建立(固定配送排程)']
+        [customer.id, totalQuantity, avgUnitPrice, totalAmount, '系統自動建立(固定配送排程)']
       ) as any
       const orderId = result.insertId
 
-      await conn.query(
-        `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
-        [orderId, customer.gas_type, quantity, unitPrice, totalAmount]
-      )
+      for (const it of orderItems) {
+        await conn.query(
+          `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+          [orderId, it.gasType, it.quantity, it.unitPrice, it.quantity * Number(it.unitPrice)]
+        )
+      }
 
       await conn.query(
         `INSERT INTO customer_events (customer_id, event_type, detail) VALUES (?, 'AUTO_SCHEDULED_ORDER', ?)`,
@@ -155,7 +190,7 @@ export async function runDailyScheduledOrders() {
       )
 
       await conn.commit()
-      console.log(`[dailyScheduledOrders] 已為 ${customer.name}(#${customer.id}) 建立草稿訂單 #${orderId}，數量 ${quantity}`)
+      console.log(`[dailyScheduledOrders] 已為 ${customer.name}(#${customer.id}) 建立草稿訂單 #${orderId}，共 ${orderItems.length} 個品項`)
       created++
     } catch (err) {
       await conn.rollback()
