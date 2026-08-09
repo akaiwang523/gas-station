@@ -82,15 +82,17 @@ export async function incomingCall(req: Request, res: Response) {
 
   const normalized = normalizePhone(phone)
 
+  // 拿掉 LIMIT 1：一支電話（同一個客戶）可能對應到不只一筆客戶資料（例如同一人開兩間店，
+  // 兩筆客戶都填同一支電話）。這裡先撈出全部符合的客戶，再依筆數分流處理
   const [rows] = await db.query(
     `SELECT c.*, a.amount_owed, a.cylinders_owed 
      FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE (c.phone = ? OR c.phone2 = ?) AND c.status != 'INACTIVE' LIMIT 1`,
+     WHERE (c.phone = ? OR c.phone2 = ?) AND c.status != 'INACTIVE' ORDER BY c.id ASC`,
     [normalized, normalized]
   ) as any
 
-  if (!rows[0]) {
+  if (rows.length === 0) {
     // 陌生號碼，寫進資料庫（同號碼重複來電只累加次數，不重複建列）
     const [existingUnknown] = await db.query(
       `SELECT id FROM unknown_calls WHERE phone = ? AND status = 'PENDING' LIMIT 1`,
@@ -110,6 +112,30 @@ export async function incomingCall(req: Request, res: Response) {
     }
 
     return res.json({ found: false, phone: normalized, draft: null })
+  }
+
+  if (rows.length > 1) {
+    // 一支電話對到不只一間店：不自動選、不自動建單，改成跟「陌生來電」一樣先進佇列，
+    // 但額外帶上比對到的客戶清單，讓前端跳出「這通電話是哪間店？」的快速選擇畫面
+    const matchedIds = rows.map((r: any) => r.id)
+    const [existingUnknown] = await db.query(
+      `SELECT id FROM unknown_calls WHERE phone = ? AND status = 'PENDING' LIMIT 1`,
+      [normalized]
+    ) as any
+
+    if (existingUnknown[0]) {
+      await db.query(
+        `UPDATE unknown_calls SET last_called_at = NOW(), call_count = call_count + 1, matched_customer_ids = ? WHERE id = ?`,
+        [JSON.stringify(matchedIds), existingUnknown[0].id]
+      )
+    } else {
+      await db.query(
+        `INSERT INTO unknown_calls (phone, status, matched_customer_ids) VALUES (?, 'PENDING', ?)`,
+        [normalized, JSON.stringify(matchedIds)]
+      )
+    }
+
+    return res.json({ found: false, multiMatch: true, phone: normalized, draft: null })
   }
 
   // 這支號碼現在找到客戶了，把之前的陌生來電紀錄標記已處理
@@ -284,22 +310,52 @@ export async function getDraft(_req: Request, res: Response) {
 
   // 沒有草稿單，查資料庫裡還沒處理的陌生來電（不再有 5 分鐘限制，永久保留直到處理）
   const [unknownRows] = await db.query(
-    `SELECT id, phone, first_called_at, last_called_at, call_count
+    `SELECT id, phone, first_called_at, last_called_at, call_count, matched_customer_ids
      FROM unknown_calls WHERE status = 'PENDING' ORDER BY first_called_at ASC`
   ) as any
 
-  const unknownCalls = unknownRows.map((u: any) => ({
-    id: u.id,
-    phone: u.phone,
-    firstCalledAt: u.first_called_at,
-    lastCalledAt: u.last_called_at,
-    callCount: u.call_count,
-  }))
+  // 一支電話對到多筆客戶（同一人開多間店）的情況，額外帶出這幾筆客戶的姓名/地址，
+  // 前端可以直接列出來給人選，不用像真的陌生號碼那樣還要打字搜尋
+  const allMatchedIds: number[] = Array.from(new Set(
+    unknownRows.flatMap((u: any) => {
+      if (!u.matched_customer_ids) return []
+      try { return JSON.parse(u.matched_customer_ids) } catch { return [] }
+    })
+  ))
+  let matchedCustomersById: Record<number, { id: number; name: string; address: string }> = {}
+  if (allMatchedIds.length > 0) {
+    const placeholders = allMatchedIds.map(() => '?').join(',')
+    const [mc] = await db.query(
+      `SELECT id, name, address FROM customers WHERE id IN (${placeholders})`,
+      allMatchedIds
+    ) as any
+    matchedCustomersById = Object.fromEntries(mc.map((c: any) => [c.id, c]))
+  }
+
+  const unknownCalls = unknownRows.map((u: any) => {
+    let matchedCustomers: { id: number; name: string; address: string }[] = []
+    if (u.matched_customer_ids) {
+      try {
+        matchedCustomers = (JSON.parse(u.matched_customer_ids) as number[])
+          .map((id) => matchedCustomersById[id])
+          .filter(Boolean)
+      } catch { /* 壞資料就當沒有比對到 */ }
+    }
+    return {
+      id: u.id,
+      phone: u.phone,
+      firstCalledAt: u.first_called_at,
+      lastCalledAt: u.last_called_at,
+      callCount: u.call_count,
+      matchedCustomers,
+    }
+  })
 
   return res.json({
     draft: null,
     drafts: [],
     unknownPhone: unknownCalls[0]?.phone || null,  // 舊欄位相容：最早那筆
+    matchedCustomers: unknownCalls[0]?.matchedCustomers || [],  // 同上，最早那筆比對到的客戶（一號多店時才會有值）
     unknownCalls,                                    // 完整佇列，之後首頁可以用這個顯示常駐清單
   })
 }

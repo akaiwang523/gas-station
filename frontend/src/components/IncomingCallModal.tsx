@@ -42,6 +42,9 @@ const FALLBACK_PRICE: Record<string, number> = {
 export default function IncomingCallModal() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [unknownPhone, setUnknownPhone] = useState<string | null>(null)
+  // 一支電話比對到不只一筆客戶時（同一人開多間店，電話都填一樣），
+  // 直接列出這幾筆客戶讓人選，不用像真的陌生號碼那樣要打字搜尋
+  const [matchedCustomers, setMatchedCustomers] = useState<{ id: number; name: string; address: string }[]>([])
   const [visible, setVisible] = useState(false)
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>(FALLBACK_PRICE)
@@ -106,6 +109,7 @@ export default function IncomingCallModal() {
           shownUnknownPhone.current = data.unknownPhone
           shownDraftId.current = null
           setUnknownPhone(data.unknownPhone)
+          setMatchedCustomers(data.matchedCustomers || [])
           setDraft(null)
           setNewName('')
           setNewAddress('')
@@ -251,6 +255,28 @@ export default function IncomingCallModal() {
     }
   }
 
+  // 一號多店：選了其中一間店，直接用 incoming-by-id 建草稿單（不能用 /bind，
+  // 因為這支電話本來就已經同時登記在好幾筆客戶身上，/bind 的重複號碼檢查會擋下來）
+  async function handleQuickPick(customerId: number) {
+    if (!unknownPhone) return
+    setLoading(true)
+    try {
+      await fetch('/api/caller/incoming-by-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ customerId, phone: unknownPhone })
+      })
+      shownUnknownPhone.current = null
+      window.dispatchEvent(new Event('order-refresh'))
+    } finally {
+      setVisible(false)
+      setUnknownPhone(null)
+      setMatchedCustomers([])
+      setLoading(false)
+      poll()
+    }
+  }
+
   async function handleCreateAndOrder() {
     if (!unknownPhone) return
     setLoading(true)
@@ -309,6 +335,7 @@ export default function IncomingCallModal() {
     setVisible(false)
     setDraft(null)
     setUnknownPhone(null)
+    setMatchedCustomers([])
     setSearchMode(false)
     shownUnknownPhone.current = null
   }
@@ -322,12 +349,34 @@ export default function IncomingCallModal() {
           <div className="bg-gray-700 text-white px-5 py-4 flex items-center gap-3">
             <span className="text-3xl">📞</span>
             <div>
-              <div className="font-bold text-lg">陌生來電</div>
+              <div className="font-bold text-lg">{matchedCustomers.length > 0 ? '這通電話是哪一間？' : '陌生來電'}</div>
               <div className="text-gray-300 text-sm">{unknownPhone}</div>
             </div>
           </div>
 
-          {!searchMode ? (
+          {matchedCustomers.length > 0 ? (
+            <>
+              <div className="px-5 py-4 space-y-2">
+                <div className="text-gray-500 text-sm">這支電話對到不只一間店，點選要建單的那一間</div>
+                {matchedCustomers.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleQuickPick(c.id)}
+                    disabled={loading}
+                    className="w-full text-left bg-gray-50 hover:bg-orange-50 rounded-xl px-3 py-2.5 transition"
+                  >
+                    <div className="font-medium text-gray-800 text-sm">{c.name}</div>
+                    <div className="text-gray-500 text-xs">{c.address}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="px-5 pb-5">
+                <button onClick={handleDismiss} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  略過
+                </button>
+              </div>
+            </>
+          ) : !searchMode ? (
             <>
               <div className="px-5 py-4 space-y-3">
                 <div className="flex items-center justify-between">
