@@ -63,6 +63,8 @@ export default function IncomingCallModal() {
 
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
+  // 按過「稍後」的草稿 id，暫時跳過它、換下一筆顯示，而不是整個佇列卡住等這筆被處理完
+  const deferredIds = useRef<Set<number>>(new Set())
   const token = localStorage.getItem('token')
 
   useEffect(() => {
@@ -79,7 +81,7 @@ export default function IncomingCallModal() {
       .catch(() => {})
   }, [])
 
-  // 抽成共用函式：輪詢計時器跟「確認/取消後立刻檢查下一筆」都呼叫這個
+  // 抽成共用函式：輪詢計時器跟「確認/取消/稍後後立刻檢查下一筆」都呼叫這個
   const poll = useCallback(async () => {
     if (!token) return
     try {
@@ -88,16 +90,26 @@ export default function IncomingCallModal() {
       })
       const data = await res.json()
 
-      if (data.draft) {
-        if (data.draft.id !== shownDraftId.current) {
-          shownDraftId.current = data.draft.id
+      // 清掉已經不在佇列裡的稍後記錄（該筆已經被確認/取消掉了），避免這個 Set 無限長大
+      const currentIds = new Set((data.drafts || []).map((d: any) => d.id))
+      for (const id of deferredIds.current) {
+        if (!currentIds.has(id)) deferredIds.current.delete(id)
+      }
+
+      // 從完整佇列裡挑「還沒被按過稍後」的最早一筆，而不是永遠只看最早那筆——
+      // 這樣按稍後之後，佇列後面排隊的來電才有機會馬上顯示，不用等最早那筆被處理完
+      const nextDraft = (data.drafts || []).find((d: any) => !deferredIds.current.has(d.id)) || null
+
+      if (nextDraft) {
+        if (nextDraft.id !== shownDraftId.current) {
+          shownDraftId.current = nextDraft.id
           shownUnknownPhone.current = null
-          setDraft(data.draft)
+          setDraft(nextDraft)
           setUnknownPhone(null)
-          setPaymentType(data.draft.paymentType === 'AR' ? 'AR' : 'CASH')
+          setPaymentType(nextDraft.paymentType === 'AR' ? 'AR' : 'CASH')
           setEditItems(
-            data.draft.items && data.draft.items.length > 0
-              ? data.draft.items.map((i: DraftItem) => ({ gasType: i.gasType, quantity: i.quantity, unitPrice: i.unitPrice }))
+            nextDraft.items && nextDraft.items.length > 0
+              ? nextDraft.items.map((i: DraftItem) => ({ gasType: i.gasType, quantity: i.quantity, unitPrice: i.unitPrice }))
               : [{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: baselinePrices.BOTTLED_20KG }]
           )
           setScheduledDate('')
@@ -121,9 +133,11 @@ export default function IncomingCallModal() {
           setVisible(true)
         }
       } else {
-        // 目前沒有任何待處理草稿/陌生來電，重設記錄，避免漏接下一筆新進來的同 ID 情況
+        // 目前沒有任何「還沒被稍後」的待處理草稿/陌生來電，重設記錄，避免漏接下一筆新進來的同 ID 情況
         shownDraftId.current = null
         shownUnknownPhone.current = null
+        setVisible(false)
+        setDraft(null)
       }
     } catch {
       // 靜默失敗
@@ -137,14 +151,16 @@ export default function IncomingCallModal() {
     return () => clearInterval(timer)
   }, [token, poll])
 
-  // 這支訂單維持在資料庫的 DRAFT 狀態，不打任何 API——只是把彈窗關掉，
-  // 讓你晚點自己去「訂單」頁的「來電草稿（待確認）」清單挑時間處理，
-  // 跟預測清單「不自動推播、要自己點」是同一種設計
+  // 這支訂單維持在資料庫的 DRAFT 狀態，不打任何 API——只是先把這筆記起來跳過，
+  // 立刻改顯示佇列裡下一筆還沒處理過的來電；這筆被稍後的還是留在「訂單」頁的
+  // 「來電草稿（待確認）」清單裡，之後可以自己回去點開處理
   function handleDefer() {
     if (!draft) return
+    deferredIds.current.add(draft.id)
     setVisible(false)
-    // shownDraftId 保持不變：這筆草稿狀態沒有改變，之後輪詢還是會抓到同一筆，
-    // 但因為 id 沒變就不會被判定成「新草稿」而重新跳出彈窗
+    setDraft(null)
+    shownDraftId.current = null
+    poll()
   }
 
   async function handleConfirm() {
