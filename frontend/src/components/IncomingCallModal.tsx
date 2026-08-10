@@ -53,6 +53,7 @@ export default function IncomingCallModal() {
   const [editItems, setEditItems] = useState<EditItem[]>([{ gasType: 'BOTTLED_20KG', quantity: 1, unitPrice: FALLBACK_PRICE.BOTTLED_20KG }])
   const [scheduledDate, setScheduledDate] = useState('')
   const [rememberPrice, setRememberPrice] = useState(false)
+  const [rememberPriceIndex, setRememberPriceIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newAddress, setNewAddress] = useState('')
@@ -126,6 +127,7 @@ export default function IncomingCallModal() {
           )
           setScheduledDate('')
           setRememberPrice(false)
+          setRememberPriceIndex(0)
           setVisible(true)
         }
       } else if (nextItem?.kind === 'unknown') {
@@ -188,14 +190,21 @@ export default function IncomingCallModal() {
         },
         body: JSON.stringify({ paymentType, items: editItems, scheduledDate })
       })
-      // 「記住這個單價」：只在單一規格時出現這個選項（避免多規格客戶被單一數字誤蓋掉）
-      if (rememberPrice && editItems.length === 1) {
-        try { await api.updateCustomer(draft.customer.id, { price_override: editItems[0].unitPrice }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+      // 「記住這個單價」：品項單價都一樣時直接存那個數字；不一樣時用下拉選單選的那個品項的單價
+      if (rememberPrice) {
+        const uniquePrices = new Set(editItems.map(i => i.unitPrice))
+        const chosen = uniquePrices.size === 1
+          ? editItems[0]
+          : (editItems[rememberPriceIndex] || editItems[0])
+        if (chosen) {
+          try { await api.updateCustomer(draft.customer.id, { price_override: chosen.unitPrice }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+        }
       }
       setVisible(false)
       setDraft(null)
       shownDraftId.current = null
       setRememberPrice(false)
+      setRememberPriceIndex(0)
       window.dispatchEvent(new Event('order-refresh'))
       // 立刻檢查有沒有下一筆排隊中的草稿，不用等下一次輪詢
       poll()
@@ -576,16 +585,34 @@ export default function IncomingCallModal() {
             <button onClick={addEditItem} className="mt-2 w-full border-2 border-dashed border-gray-300 text-gray-500 rounded-xl py-2 text-sm font-medium">
               + 新增品項
             </button>
-            {editItems.length === 1 && (
-              <label className="flex items-center gap-2 text-sm text-gray-600 mt-2">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-orange-500"
-                  checked={rememberPrice}
-                  onChange={e => setRememberPrice(e.target.checked)}
-                />
-                🔒 記住這個單價（存成 {draft.customer.name} 的特殊單價，以後自動帶入）
-              </label>
+            {editItems.length > 0 && (
+              <div className="text-sm text-gray-600 mt-2 space-y-1.5">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-orange-500"
+                    checked={rememberPrice}
+                    onChange={e => setRememberPrice(e.target.checked)}
+                  />
+                  🔒 記住這個單價（存成 {draft.customer.name} 的特殊單價，以後自動帶入）
+                </label>
+                {rememberPrice && new Set(editItems.map(i => i.unitPrice)).size > 1 && (
+                  <div className="flex items-center gap-2 pl-6">
+                    <span>這幾個品項單價不同，記住哪一個：</span>
+                    <select
+                      className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                      value={rememberPriceIndex}
+                      onChange={e => setRememberPriceIndex(Number(e.target.value))}
+                    >
+                      {editItems.map((it, idx) => (
+                        <option key={idx} value={idx}>
+                          {GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
             )}
             <div className="flex justify-between items-center pt-3 font-bold text-orange-500 text-lg">
               <span>合計</span>

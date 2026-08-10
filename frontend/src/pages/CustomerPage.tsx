@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 
 type Customer = {
@@ -166,6 +166,9 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
     )
     setEditId(c.id)
     setShowForm(true)
+    setLinkSearchOpen(false)
+    setLinkSearchQuery('')
+    setLinkSearchResults([])
   }
 
   async function handleSave() {
@@ -214,6 +217,47 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
     }
   }
 
+  // 「連結到既有客戶」：從編輯表單裡直接搜尋既有客戶並合併，
+  // 用途是像圖片裡的「LED」這種還沒補上正確姓名/檔案的客戶，
+  // 其實店家早就有檔案只是沒登記到這支電話 —— 不用先去客戶列表勾兩筆再合併
+  const [linkSearchOpen, setLinkSearchOpen] = useState(false)
+  const [linkSearchQuery, setLinkSearchQuery] = useState('')
+  const [linkSearchResults, setLinkSearchResults] = useState<Customer[]>([])
+  const [linkSearching, setLinkSearching] = useState(false)
+  const linkSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleLinkSearchChange(q: string) {
+    setLinkSearchQuery(q)
+    if (linkSearchTimer.current) clearTimeout(linkSearchTimer.current)
+    if (!q.trim()) { setLinkSearchResults([]); return }
+    linkSearchTimer.current = setTimeout(async () => {
+      setLinkSearching(true)
+      try {
+        const res = await api.searchCustomers(q)
+        setLinkSearchResults((res.customers || []).filter((c: Customer) => c.id !== editId))
+      } catch {
+        setLinkSearchResults([])
+      } finally {
+        setLinkSearching(false)
+      }
+    }, 300)
+  }
+
+  async function startLinkMerge(candidate: Customer) {
+    if (!editId) return
+    setMergePreviewLoading(true)
+    try {
+      const res = await api.mergePreview(editId, candidate.id)
+      setMergePreviewData(res)
+      // 預設保留被搜到選中的那一筆既有客戶（通常才是資料比較完整、真正該保留的那筆）
+      setMergeKeepId(candidate.id)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setMergePreviewLoading(false)
+    }
+  }
+
   function toggleMergeMode() {
     setMergeMode(m => !m)
     setSelectedForMerge([])
@@ -252,6 +296,12 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
       closeMergePreview()
       setMergeMode(false)
       setSelectedForMerge([])
+      setLinkSearchOpen(false)
+      setLinkSearchQuery('')
+      setLinkSearchResults([])
+      // 從訂單卡片的快速編輯彈窗連結合併時，被合併掉的那筆客戶就是目前正在編輯的 editId，
+      // 表單留著繼續編輯已經沒意義，直接關閉並讓訂單清單重整（closeForm 會觸發 onQuickEditClose）
+      if (quickEditOnly) closeForm()
       await load()
     } catch (e: any) {
       alert(e.message)
@@ -366,6 +416,45 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
               <h3 className="text-lg font-bold">{editId ? '編輯客戶' : '新增客戶'}</h3>
               <button onClick={closeForm} className="text-gray-400 text-2xl">×</button>
             </div>
+
+            {editId && (
+              <div className="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
+                <button
+                  onClick={() => setLinkSearchOpen(o => !o)}
+                  className="text-sm text-blue-600 font-medium flex items-center gap-1"
+                >
+                  🔗 這其實是同一位客戶？{linkSearchOpen ? '（收合）' : '連結到既有客戶'}
+                </button>
+                {linkSearchOpen && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-500">
+                      搜尋已經有檔案、但沒登記到這支電話的既有客戶，選中後會出現合併預覽，可以選要保留哪一筆資料
+                    </p>
+                    <input
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      placeholder="搜尋既有客戶姓名或電話"
+                      value={linkSearchQuery}
+                      onChange={e => handleLinkSearchChange(e.target.value)}
+                    />
+                    {linkSearching && <div className="text-xs text-gray-400">搜尋中...</div>}
+                    {!linkSearching && linkSearchQuery.trim() && linkSearchResults.length === 0 && (
+                      <div className="text-xs text-gray-400">找不到符合的客戶</div>
+                    )}
+                    {linkSearchResults.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => startLinkMerge(c)}
+                        disabled={mergePreviewLoading}
+                        className="w-full text-left border border-gray-200 rounded-lg p-2 hover:border-blue-400 transition disabled:opacity-50"
+                      >
+                        <div className="text-sm font-medium text-gray-800">{c.name}</div>
+                        <div className="text-xs text-gray-500">{c.phone || '（無電話）'}{c.address ? ` · ${c.address}` : ''}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {[
               { label: '姓名 *', key: 'name', placeholder: '客戶姓名或店名' },

@@ -61,6 +61,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const [paymentType, setPaymentType] = useState<'CASH' | 'AR'>('CASH')
   const [scheduledDate, setScheduledDate] = useState('')
   const [rememberPrice, setRememberPrice] = useState(false)
+  const [rememberPriceIndex, setRememberPriceIndex] = useState(0)
   const [callTime, setCallTime] = useState('')
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
@@ -109,6 +110,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setSearch(c.name)
     setResults([])
     setRememberPrice(false)
+    setRememberPriceIndex(0)
     if (Number(c.amount_owed) > 0) setPaymentType('AR')
     else setPaymentType('CASH')
 
@@ -187,6 +189,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
     setPendingReturns([])
     setScheduledDate('')
     setRememberPrice(false)
+    setRememberPriceIndex(0)
   }
 
   // deferred=true 對應「稍後建單」：不等 API 回應完成，立刻清空表單、回到訂單列表，
@@ -215,7 +218,7 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       isNew, newName, newPhone, newAddress, newCustomerType,
       selectedId: selected?.id, selectedName: selected?.name,
       items: items.map(i => ({ ...i })), stairFee, paymentType, scheduledDate, callTime,
-      note, rememberPrice,
+      note, rememberPrice, rememberPriceIndex,
     }
     const totalNote = [snapshot.note, snapshot.stairFee > 0 ? `樓梯費$${snapshot.stairFee}` : ''].filter(Boolean).join('、')
     const totalQty = snapshot.items.reduce((s, i) => s + i.quantity, 0)
@@ -234,10 +237,16 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
       }
       await api.createOrder({ customerId, items: snapshot.items, stairFee: snapshot.stairFee, paymentType: snapshot.paymentType, note: totalNote, scheduledDate: snapshot.scheduledDate, callTime: snapshot.callTime })
 
-      // 「記住這個價格」：只在單一規格時才會出現這個選項（避免多規格客戶被單一數字誤蓋掉），
-      // 勾選的話，建單同時把這次的單價存成客戶的特殊單價，之後就會自動帶入，不用再跑一趟客戶頁面改
-      if (snapshot.rememberPrice && snapshot.items.length === 1) {
-        try { await api.updateCustomer(customerId, { price_override: snapshot.items[0].unit_price }) } catch { /* 訂單已經建立成功，這步失敗就算了，不影響本次接單 */ }
+      // 「記住這個價格」：勾選的話，建單同時把單價存成客戶的特殊單價，之後就會自動帶入，不用再跑一趟客戶頁面改。
+      // 品項單價都一樣時直接存那個數字；品項單價不一樣時，用使用者在下拉選單選的那個品項的單價
+      if (snapshot.rememberPrice) {
+        const uniquePrices = new Set(snapshot.items.map(i => i.unit_price))
+        const chosen = uniquePrices.size === 1
+          ? snapshot.items[0]
+          : (snapshot.items[snapshot.rememberPriceIndex] || snapshot.items[0])
+        if (chosen) {
+          try { await api.updateCustomer(customerId, { price_override: chosen.unit_price }) } catch { /* 訂單已經建立成功，這步失敗就算了，不影響本次接單 */ }
+        }
       }
     }
 
@@ -403,16 +412,34 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
         </button>
       </div>
 
-      {!isNew && selected && items.length === 1 && (
-        <label className="flex items-center gap-2 text-sm text-gray-600 -mt-2">
-          <input
-            type="checkbox"
-            className="w-4 h-4 accent-orange-500"
-            checked={rememberPrice}
-            onChange={e => setRememberPrice(e.target.checked)}
-          />
-          🔒 記住這個單價（存成 {selected.name} 的特殊單價，以後自動帶入）
-        </label>
+      {!isNew && selected && (
+        <div className="text-sm text-gray-600 -mt-2 space-y-1.5">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-orange-500"
+              checked={rememberPrice}
+              onChange={e => setRememberPrice(e.target.checked)}
+            />
+            🔒 記住這個單價（存成 {selected.name} 的特殊單價，以後自動帶入）
+          </label>
+          {rememberPrice && new Set(items.map(i => i.unit_price)).size > 1 && (
+            <div className="flex items-center gap-2 pl-6">
+              <span>這幾個品項單價不同，記住哪一個：</span>
+              <select
+                className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                value={rememberPriceIndex}
+                onChange={e => setRememberPriceIndex(Number(e.target.value))}
+              >
+                {items.map((it, idx) => (
+                  <option key={idx} value={idx}>
+                    {GAS_LABELS[it.gas_type] || it.gas_type} — ${it.unit_price}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       )}
 
       {/* 樓梯費 */}

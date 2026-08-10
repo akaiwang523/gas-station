@@ -101,6 +101,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [draftEditId, setDraftEditId] = useState<number | null>(null)
   const [draftItems, setDraftItems] = useState<{ gasType: string; quantity: string; unitPrice: string }[]>([{ gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: '800' }])
   const [draftRememberPrice, setDraftRememberPrice] = useState(false)
+  const [draftRememberPriceIndex, setDraftRememberPriceIndex] = useState(0)
   const [draftPaymentType, setDraftPaymentType] = useState('CASH')
   const [draftScheduledDate, setDraftScheduledDate] = useState('')
   const [draftConfirmLoading, setDraftConfirmLoading] = useState(false)
@@ -113,6 +114,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [editNote, setEditNote] = useState('')
   const [editPaymentType, setEditPaymentType] = useState('CASH')
   const [editRememberPrice, setEditRememberPrice] = useState(false)
+  const [editRememberPriceIndex, setEditRememberPriceIndex] = useState(0)
   const [editLoading, setEditLoading] = useState(false)
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
   // 待送分頁多選批次標記完成（處理「其實已經送完但忘記點完成」累積下來的舊單）
@@ -193,6 +195,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     setEditNote(order.note || '')
     setEditPaymentType(order.payment_type)
     setEditRememberPrice(false)
+    setEditRememberPriceIndex(0)
     // 若 load() 階段還沒撈到（例如已完成訂單），補撈一次
     if (!customerHistory[order.customer_id]) {
       try {
@@ -213,8 +216,15 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         id: i.id || undefined, gasType: i.gasType, quantity: Number(i.quantity), unitPrice: Number(i.unitPrice),
       }))
       await api.updateOrder(order.id, { items, note: editNote, paymentType: editPaymentType })
-      if (editRememberPrice && editItems.length === 1) {
-        try { await api.updateCustomer(order.customer_id, { price_override: Number(editItems[0].unitPrice) || 0 }) } catch { /* 訂單已經存好了，這步失敗不影響本次修改 */ }
+      // 「記住這個單價」：品項單價都一樣時直接存那個數字；不一樣時用下拉選單選的那個品項的單價
+      if (editRememberPrice) {
+        const uniquePrices = new Set(editItems.map(i => Number(i.unitPrice) || 0))
+        const chosen = uniquePrices.size === 1
+          ? editItems[0]
+          : (editItems[editRememberPriceIndex] || editItems[0])
+        if (chosen) {
+          try { await api.updateCustomer(order.customer_id, { price_override: Number(chosen.unitPrice) || 0 }) } catch { /* 訂單已經存好了，這步失敗不影響本次修改 */ }
+        }
       }
       setExpandedId(null)
       await load()
@@ -356,6 +366,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     setDraftPaymentType(d.payment_type || 'CASH')
     setDraftScheduledDate('')
     setDraftRememberPrice(false)
+    setDraftRememberPriceIndex(0)
   }
   function updateDraftItem(idx: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
     setDraftItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it))
@@ -380,8 +391,14 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         items: draftItems.map(i => ({ gasType: i.gasType, quantity: Number(i.quantity) || 1, unitPrice: Number(i.unitPrice) || 0 })),
         scheduledDate: draftScheduledDate,
       })
-      if (draftRememberPrice && draftItems.length === 1) {
-        try { await api.updateCustomer(customerId, { price_override: Number(draftItems[0].unitPrice) || 0 }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+      if (draftRememberPrice) {
+        const uniquePrices = new Set(draftItems.map(i => Number(i.unitPrice) || 0))
+        const chosen = uniquePrices.size === 1
+          ? draftItems[0]
+          : (draftItems[draftRememberPriceIndex] || draftItems[0])
+        if (chosen) {
+          try { await api.updateCustomer(customerId, { price_override: Number(chosen.unitPrice) || 0 }) } catch { /* 訂單已經建好了，這步失敗不影響本次派單 */ }
+        }
       }
       setDraftEditId(null)
       setDrafts(prev => prev.filter(x => x.id !== id))
@@ -498,16 +515,34 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       </button>
                     </div>
                     <div className="text-xs text-gray-500">合計：${draftItemsTotal().toLocaleString()}</div>
-                    {draftItems.length === 1 && (
-                      <label className="flex items-center gap-2 text-xs text-gray-600">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 accent-orange-500"
-                          checked={draftRememberPrice}
-                          onChange={e => setDraftRememberPrice(e.target.checked)}
-                        />
-                        🔒 記住這個單價（存成 {d.customer_name} 的特殊單價，以後自動帶入）
-                      </label>
+                    {draftItems.length > 0 && (
+                      <div className="text-xs text-gray-600 space-y-1">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 accent-orange-500"
+                            checked={draftRememberPrice}
+                            onChange={e => setDraftRememberPrice(e.target.checked)}
+                          />
+                          🔒 記住這個單價（存成 {d.customer_name} 的特殊單價，以後自動帶入）
+                        </label>
+                        {draftRememberPrice && new Set(draftItems.map(i => Number(i.unitPrice) || 0)).size > 1 && (
+                          <div className="flex items-center gap-2 pl-6">
+                            <span>品項單價不同，記住哪一個：</span>
+                            <select
+                              className="border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                              value={draftRememberPriceIndex}
+                              onChange={e => setDraftRememberPriceIndex(Number(e.target.value))}
+                            >
+                              {draftItems.map((it, idx) => (
+                                <option key={idx} value={idx}>
+                                  {GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
                     )}
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">付款方式</label>
@@ -967,16 +1002,34 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">合計：${editItemsTotal().toLocaleString()}</label>
                   </div>
-                  {editItems.length === 1 && (
-                    <label className="flex items-center gap-2 text-xs text-gray-600" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 accent-orange-500"
-                        checked={editRememberPrice}
-                        onChange={e => setEditRememberPrice(e.target.checked)}
-                      />
-                      🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
-                    </label>
+                  {editItems.length > 0 && (
+                    <div className="text-xs text-gray-600 space-y-1" onClick={e => e.stopPropagation()}>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-orange-500"
+                          checked={editRememberPrice}
+                          onChange={e => setEditRememberPrice(e.target.checked)}
+                        />
+                        🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
+                      </label>
+                      {editRememberPrice && new Set(editItems.map(i => Number(i.unitPrice) || 0)).size > 1 && (
+                        <div className="flex items-center gap-2 pl-6">
+                          <span>品項單價不同，記住哪一個：</span>
+                          <select
+                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                            value={editRememberPriceIndex}
+                            onChange={e => setEditRememberPriceIndex(Number(e.target.value))}
+                          >
+                            {editItems.map((it, idx) => (
+                              <option key={idx} value={idx}>
+                                {GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">備註</label>
@@ -1127,16 +1180,34 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     >＋ 新增品項（不同規格）</button>
                   </div>
                   <div className="text-xs text-gray-500">合計：${editItemsTotal().toLocaleString()}</div>
-                  {editItems.length === 1 && (
-                    <label className="flex items-center gap-2 text-xs text-gray-600">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 accent-orange-500"
-                        checked={editRememberPrice}
-                        onChange={e => setEditRememberPrice(e.target.checked)}
-                      />
-                      🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
-                    </label>
+                  {editItems.length > 0 && (
+                    <div className="text-xs text-gray-600 space-y-1">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-orange-500"
+                          checked={editRememberPrice}
+                          onChange={e => setEditRememberPrice(e.target.checked)}
+                        />
+                        🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
+                      </label>
+                      {editRememberPrice && new Set(editItems.map(i => Number(i.unitPrice) || 0)).size > 1 && (
+                        <div className="flex items-center gap-2 pl-6">
+                          <span>品項單價不同，記住哪一個：</span>
+                          <select
+                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                            value={editRememberPriceIndex}
+                            onChange={e => setEditRememberPriceIndex(Number(e.target.value))}
+                          >
+                            {editItems.map((it, idx) => (
+                              <option key={idx} value={idx}>
+                                {GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">備註</label>
