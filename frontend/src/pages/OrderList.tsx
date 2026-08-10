@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
 type Order = {
   id: number
@@ -175,6 +175,27 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   }
   useEffect(() => { load() }, [filter, refresh])
   useEffect(() => { api.getBaselinePrices().then(res => setBaselinePrices(res.prices || {})).catch(() => {}) }, [])
+
+  // 輪詢 LINE 活動：LINE 官方帳號進來的新訂單／新對話不會經過瀏覽器裡任何操作
+  // （webhook 直接寫資料庫），所以原本要手動重新整理才看得到。這裡改成每 5 秒問一次
+  // 「目前最新的 LINE 訂單/詢問 id」這種輕量資訊，發現變大了才真的重新整理整個列表
+  const lineActivityRef = useRef<{ orderId: number; inquiryId: number } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    async function checkLineActivity() {
+      try {
+        const res = await api.getLineActivity()
+        const prev = lineActivityRef.current
+        if (prev && (res.latestOrderId > prev.orderId || res.latestInquiryId > prev.inquiryId)) {
+          if (!cancelled) load()
+        }
+        lineActivityRef.current = { orderId: res.latestOrderId, inquiryId: res.latestInquiryId }
+      } catch { /* 這只是背景檢查，失敗就下次再試，不用打擾使用者 */ }
+    }
+    checkLineActivity()
+    const timer = setInterval(checkLineActivity, 5000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
   // 取得某筆訂單「上一次」的配送紀錄（排除自己）
   function getLastDelivery(order: Order) {
     const hist = customerHistory[order.customer_id]

@@ -18,6 +18,22 @@ export async function getOrderCounts(_req: Request, res: Response) {
   res.json(rows[0])
 }
 
+// 給前端輕量輪詢用：只回傳「目前最新的 LINE 訂單 id / LINE 詢問 id」這兩個數字，
+// 不是完整訂單清單，前端拿這個跟自己記的上一次的值比對，有變化才觸發真正的重新整理。
+// 這樣不用整個訂單列表輪詢（資料量大、頻繁打會浪費），卻能在 LINE 官方帳號有新訂單/新對話時自動更新畫面
+export async function getLineActivity(_req: Request, res: Response) {
+  const [[orderRow]] = await db.query(
+    `SELECT COALESCE(MAX(id), 0) as latestOrderId FROM orders WHERE source = 'LINE'`
+  ) as any
+  const [[inquiryRow]] = await db.query(
+    `SELECT COALESCE(MAX(id), 0) as latestInquiryId FROM line_inquiries`
+  ) as any
+  res.json({
+    latestOrderId: orderRow.latestOrderId,
+    latestInquiryId: inquiryRow.latestInquiryId,
+  })
+}
+
 export async function listOrders(req: Request, res: Response) {
   const { status, date, customerId, customerSearch, limit = '200', all, upcoming } = req.query
   const conditions: string[] = []

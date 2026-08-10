@@ -68,6 +68,7 @@ export const api = {
   },
   getTodaySummary: () => request('/orders/summary'),
   getOrderCounts: () => request('/orders/counts'),
+  getLineActivity: () => request('/orders/line-activity'),
   getPredictions: () => request('/predictions'),
   getLineInquiries: (status?: string) => request(`/line/inquiries${status ? `?status=${status}` : ''}`),
   handleLineInquiry: (id: number) => request(`/line/inquiries/${id}/handle`, { method: 'PATCH' }),

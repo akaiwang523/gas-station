@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/auth'
-import { listOrders, createOrder, updateOrderStatus, bulkUpdateOrderStatus, updateOrder, rescheduleOrder, collectPayment, getTodaySummary, getOrderCounts, cancelOrder, deleteOrder } from '../controllers/orderController'
+import { listOrders, createOrder, updateOrderStatus, bulkUpdateOrderStatus, updateOrder, rescheduleOrder, collectPayment, getTodaySummary, getOrderCounts, getLineActivity, cancelOrder, deleteOrder } from '../controllers/orderController'
 
 export const orderRoutes = Router()
 orderRoutes.use(authenticate)
 orderRoutes.get('/', listOrders)
 orderRoutes.get('/summary', getTodaySummary)
 orderRoutes.get('/counts', getOrderCounts)
+orderRoutes.get('/line-activity', getLineActivity)
 orderRoutes.post('/', createOrder)
 orderRoutes.patch('/bulk-status', bulkUpdateOrderStatus)
 orderRoutes.patch('/:id/status', updateOrderStatus)
