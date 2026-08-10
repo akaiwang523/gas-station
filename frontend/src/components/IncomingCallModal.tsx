@@ -63,8 +63,9 @@ export default function IncomingCallModal() {
 
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
-  // 按過「稍後」的草稿 id，暫時跳過它、換下一筆顯示，而不是整個佇列卡住等這筆被處理完
-  const deferredIds = useRef<Set<number>>(new Set())
+  // 按過「稍後」的項目，暫時跳過它、換下一筆顯示，而不是整個佇列卡住等這筆被處理完
+  // key 用 "draft-<id>" / "unknown-<id>" 區分，因為合併佇列後草稿跟陌生來電共用同一個 Set
+  const deferredIds = useRef<Set<string>>(new Set())
   const token = localStorage.getItem('token')
 
   useEffect(() => {
@@ -90,17 +91,28 @@ export default function IncomingCallModal() {
       })
       const data = await res.json()
 
+      // 合併後的佇列：已知客戶草稿＋陌生來電依實際時間排序，不再是「草稿一律優先」
+      const queue: Array<
+        | { kind: 'draft'; draft: any }
+        | { kind: 'unknown'; unknownCall: any }
+      > = data.queue || []
+
       // 清掉已經不在佇列裡的稍後記錄（該筆已經被確認/取消掉了），避免這個 Set 無限長大
-      const currentIds = new Set((data.drafts || []).map((d: any) => d.id))
-      for (const id of deferredIds.current) {
-        if (!currentIds.has(id)) deferredIds.current.delete(id)
+      const currentKeys = new Set(
+        queue.map(item => item.kind === 'draft' ? `draft-${item.draft.id}` : `unknown-${item.unknownCall.id}`)
+      )
+      for (const key of deferredIds.current) {
+        if (!currentKeys.has(key)) deferredIds.current.delete(key)
       }
 
-      // 從完整佇列裡挑「還沒被按過稍後」的最早一筆，而不是永遠只看最早那筆——
-      // 這樣按稍後之後，佇列後面排隊的來電才有機會馬上顯示，不用等最早那筆被處理完
-      const nextDraft = (data.drafts || []).find((d: any) => !deferredIds.current.has(d.id)) || null
+      // 從合併佇列裡挑「還沒被按過稍後」、時間最早的一筆——不分草稿或陌生來電
+      const nextItem = queue.find(item => {
+        const key = item.kind === 'draft' ? `draft-${item.draft.id}` : `unknown-${item.unknownCall.id}`
+        return !deferredIds.current.has(key)
+      }) || null
 
-      if (nextDraft) {
+      if (nextItem?.kind === 'draft') {
+        const nextDraft = nextItem.draft
         if (nextDraft.id !== shownDraftId.current) {
           shownDraftId.current = nextDraft.id
           shownUnknownPhone.current = null
@@ -116,12 +128,13 @@ export default function IncomingCallModal() {
           setRememberPrice(false)
           setVisible(true)
         }
-      } else if (data.unknownPhone) {
-        if (data.unknownPhone !== shownUnknownPhone.current) {
-          shownUnknownPhone.current = data.unknownPhone
+      } else if (nextItem?.kind === 'unknown') {
+        const nextUnknown = nextItem.unknownCall
+        if (nextUnknown.phone !== shownUnknownPhone.current) {
+          shownUnknownPhone.current = nextUnknown.phone
           shownDraftId.current = null
-          setUnknownPhone(data.unknownPhone)
-          setMatchedCustomers(data.matchedCustomers || [])
+          setUnknownPhone(nextUnknown.phone)
+          setMatchedCustomers(nextUnknown.matchedCustomers || [])
           setDraft(null)
           setNewName('')
           setNewAddress('')
@@ -156,7 +169,7 @@ export default function IncomingCallModal() {
   // 「來電草稿（待確認）」清單裡，之後可以自己回去點開處理
   function handleDefer() {
     if (!draft) return
-    deferredIds.current.add(draft.id)
+    deferredIds.current.add(`draft-${draft.id}`)
     setVisible(false)
     setDraft(null)
     shownDraftId.current = null

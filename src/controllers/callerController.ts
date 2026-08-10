@@ -269,6 +269,7 @@ export async function getDraft(_req: Request, res: Response) {
      ORDER BY o.created_at ASC`
   ) as any
 
+  let drafts: any[] = []
   if (rows.length > 0) {
     const orderIds = rows.map((o: any) => o.id)
     const placeholders = orderIds.map(() => '?').join(',')
@@ -277,7 +278,7 @@ export async function getDraft(_req: Request, res: Response) {
       orderIds
     ) as any
 
-    const drafts = rows.map((order: any) => ({
+    drafts = rows.map((order: any) => ({
       id: order.id,
       customer: {
         id: order.customer_id,
@@ -299,16 +300,10 @@ export async function getDraft(_req: Request, res: Response) {
       paymentType: order.payment_type,
       createdAt: order.created_at,
     }))
-
-    return res.json({
-      draft: drafts[0],   // 保留舊欄位相容：最早那筆（先到的客戶優先處理）
-      drafts,             // 完整草稿佇列，前端可改用這個顯示所有待處理來電
-      unknownPhone: null,
-      unknownCalls: [],
-    })
   }
 
-  // 沒有草稿單，查資料庫裡還沒處理的陌生來電（不再有 5 分鐘限制，永久保留直到處理）
+  // 陌生來電：不管有沒有已知客戶草稿單都要查，永遠不再有「已知優先、陌生殿後」的問題
+  // （不再有 5 分鐘限制，永久保留直到處理）
   const [unknownRows] = await db.query(
     `SELECT id, phone, first_called_at, last_called_at, call_count, matched_customer_ids
      FROM unknown_calls WHERE status = 'PENDING' ORDER BY first_called_at ASC`
@@ -351,12 +346,26 @@ export async function getDraft(_req: Request, res: Response) {
     }
   })
 
+  // 合併已知客戶草稿單跟陌生來電成同一個依時間排序的佇列——
+  // 這是真正的修正重點：先前是「只要有草稿單就完全不看陌生來電」，
+  // 導致陌生來電不管實際來電時間多早，永遠要等草稿單清空才輪得到。
+  // 現在改成不論類型，一律用各自的時間戳記合併排序，前端照這個佇列順序顯示。
+  type QueueItem =
+    | { kind: 'draft'; time: string; draft: any }
+    | { kind: 'unknown'; time: string; unknownCall: any }
+
+  const queue: QueueItem[] = [
+    ...drafts.map((d): QueueItem => ({ kind: 'draft', time: d.createdAt, draft: d })),
+    ...unknownCalls.map((u: any): QueueItem => ({ kind: 'unknown', time: u.firstCalledAt, unknownCall: u })),
+  ].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+
   return res.json({
-    draft: null,
-    drafts: [],
-    unknownPhone: unknownCalls[0]?.phone || null,  // 舊欄位相容：最早那筆
-    matchedCustomers: unknownCalls[0]?.matchedCustomers || [],  // 同上，最早那筆比對到的客戶（一號多店時才會有值）
-    unknownCalls,                                    // 完整佇列，之後首頁可以用這個顯示常駐清單
+    queue,               // 新欄位：已知草稿＋陌生來電合併後，依實際來電/建立時間排序的完整佇列
+    draft: drafts[0] || null,          // 舊欄位相容
+    drafts,                            // 舊欄位相容
+    unknownPhone: unknownCalls[0]?.phone || null,               // 舊欄位相容
+    matchedCustomers: unknownCalls[0]?.matchedCustomers || [],  // 舊欄位相容
+    unknownCalls,                      // 舊欄位相容
   })
 }
 
