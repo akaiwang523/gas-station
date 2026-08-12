@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
+import { normalizePhone } from '../lib/phone'
 
 export async function listCustomers(req: Request, res: Response) {
   const { status, district, search, page = '1', limit = '20' } = req.query
@@ -37,7 +38,12 @@ export async function getCustomer(req: Request, res: Response) {
     'SELECT id, gas_type as gasType, quantity FROM customer_fixed_items WHERE customer_id = ? ORDER BY id ASC',
     [id]
   ) as any
-  res.json({ ...rows[0], orders, fixedItems })
+  const [extraPhoneRows] = await db.query(
+    'SELECT phone FROM customer_phones WHERE customer_id = ? ORDER BY id ASC',
+    [id]
+  ) as any
+  const extraPhones = extraPhoneRows.map((r: any) => r.phone)
+  res.json({ ...rows[0], orders, fixedItems, extraPhones })
 }
 
 // 固定配送品項整批換新：先刪掉這位客戶原本的品項，再依傳入的清單重新寫入，
@@ -56,19 +62,43 @@ async function replaceFixedItems(customerId: number, fixedItems: any) {
   }
 }
 
+// 額外電話整批換新（跟固定配送品項同一種寫法）：一間店可能有兩支以上的電話
+// （例如同一店家的市話＋兩支員工手機），phone/phone2 兩個固定欄位裝不下，
+// 這裡用一張獨立表存「第三支以後」的電話，數量不限。
+// 傳進來前後端都不做去重，這裡統一 normalize + 去重 + 去掉空字串
+async function replaceExtraPhones(customerId: number, extraPhones: any) {
+  await db.query('DELETE FROM customer_phones WHERE customer_id = ?', [customerId])
+  if (!Array.isArray(extraPhones)) return
+  const seen = new Set<string>()
+  for (const raw of extraPhones) {
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const phone = normalizePhone(raw.trim())
+    if (!phone || seen.has(phone)) continue
+    seen.add(phone)
+    await db.query(
+      'INSERT INTO customer_phones (customer_id, phone) VALUES (?, ?)',
+      [customerId, phone]
+    )
+  }
+}
+
 export async function createCustomer(req: Request, res: Response) {
   const {
-    name, phone, address, district, note, deposit = 0, priceOverride,
+    name, phone, phone2, address, district, note, deposit = 0, priceOverride,
     deliveryCycle = 'ON_CALL', deliveryDay, gasType = 'BOTTLED_20KG', customerType, cylindersHeld = 0,
-    default_order_quantity, default_unit_price, fixedItems,
+    default_order_quantity, default_unit_price, fixedItems, extraPhones,
   } = req.body
+  // 電話存進資料庫前一律 normalize，跟接電話比對用的格式保持一致——
+  // 否則例如手key「0912-345-678」跟來電比對到的「0912345678」會被當成兩支不同號碼
+  const normalizedPhone = phone ? normalizePhone(phone) : phone
+  const normalizedPhone2 = phone2 ? normalizePhone(phone2) : (phone2 ?? null)
   const [result] = await db.query(
     `INSERT INTO customers
-      (name, phone, address, district, note, deposit, price_override, delivery_cycle, delivery_day,
+      (name, phone, phone2, address, district, note, deposit, price_override, delivery_cycle, delivery_day,
        gas_type, customer_type, cylinders_held, status, default_order_quantity, default_unit_price)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      name, phone, address, district, note, deposit, priceOverride, deliveryCycle, deliveryDay,
+      name, normalizedPhone, normalizedPhone2, address, district, note, deposit, priceOverride, deliveryCycle, deliveryDay,
       gasType, customerType || 'UNKNOWN', cylindersHeld, 'ACTIVE', default_order_quantity ?? null, default_unit_price ?? null,
     ]
   ) as any
@@ -77,7 +107,10 @@ export async function createCustomer(req: Request, res: Response) {
   if (deliveryCycle === 'WEEKLY' || deliveryCycle === 'MONTHLY_FIXED') {
     await replaceFixedItems(customerId, fixedItems)
   }
-  res.status(201).json({ id: customerId, name, phone })
+  if (Array.isArray(extraPhones)) {
+    await replaceExtraPhones(customerId, extraPhones)
+  }
+  res.status(201).json({ id: customerId, name, phone: normalizedPhone })
 }
 
 export async function updateCustomer(req: Request, res: Response) {
@@ -88,8 +121,14 @@ export async function updateCustomer(req: Request, res: Response) {
   const body: any = req.body
   for (const f of fields) {
     const key = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-    if (body[key] !== undefined) { updates.push(`${f} = ?`); params.push(body[key]) }
-    else if (body[f] !== undefined) { updates.push(`${f} = ?`); params.push(body[f]) }
+    let value = body[key] !== undefined ? body[key] : (body[f] !== undefined ? body[f] : undefined)
+    if (value === undefined) continue
+    // 電話欄位一律 normalize 再存，理由同 createCustomer
+    if ((f === 'phone' || f === 'phone2') && typeof value === 'string' && value) {
+      value = normalizePhone(value)
+    }
+    updates.push(`${f} = ?`)
+    params.push(value)
   }
   if (updates.length) {
     params.push(id)
@@ -101,7 +140,13 @@ export async function updateCustomer(req: Request, res: Response) {
     const cycle = body.delivery_cycle ?? body.deliveryCycle
     await replaceFixedItems(id, cycle === 'WEEKLY' || cycle === 'MONTHLY_FIXED' ? body.fixedItems : [])
   }
-  if (!updates.length && body.fixedItems === undefined) return res.status(400).json({ error: '沒有要更新的欄位' })
+  // extraPhones 有帶才處理：第三支以後的電話整批換新
+  if (body.extraPhones !== undefined) {
+    await replaceExtraPhones(id, body.extraPhones)
+  }
+  if (!updates.length && body.fixedItems === undefined && body.extraPhones === undefined) {
+    return res.status(400).json({ error: '沒有要更新的欄位' })
+  }
   res.json({ ok: true })
 }
 
@@ -185,14 +230,27 @@ export async function mergeCustomers(req: Request, res: Response) {
       return res.status(400).json({ error: '這筆客戶已經是停用狀態，可能已經被合併過了' })
     }
 
-    // 電話：被合併那筆的電話，補進保留客戶的空欄位（phone 優先，其次 phone2）
+    // 電話：被合併那筆的電話，補進保留客戶的空欄位（phone 優先、其次 phone2，
+    // 兩個固定欄位都滿了就放進 customer_phones，不會再像以前那樣直接被丟掉）
     if (mergeCustomer.phone && mergeCustomer.phone !== keepCustomer.phone && mergeCustomer.phone !== keepCustomer.phone2) {
       if (!keepCustomer.phone) {
         await conn.query('UPDATE customers SET phone = ? WHERE id = ?', [mergeCustomer.phone, keep])
       } else if (!keepCustomer.phone2) {
         await conn.query('UPDATE customers SET phone2 = ? WHERE id = ?', [mergeCustomer.phone, keep])
+      } else {
+        await conn.query(
+          'INSERT IGNORE INTO customer_phones (customer_id, phone) VALUES (?, ?)',
+          [keep, mergeCustomer.phone]
+        )
       }
     }
+    // 被合併那筆自己額外掛的電話（customer_phones），全部轉到保留客戶身上
+    await conn.query(
+      `INSERT IGNORE INTO customer_phones (customer_id, phone)
+       SELECT ?, phone FROM customer_phones WHERE customer_id = ?`,
+      [keep, merge]
+    )
+    await conn.query('DELETE FROM customer_phones WHERE customer_id = ?', [merge])
     // 地址：保留客戶是空的或是「（待補）」，就用被合併那筆補上
     if ((!keepCustomer.address || keepCustomer.address === '（待補）') && mergeCustomer.address) {
       await conn.query('UPDATE customers SET address = ? WHERE id = ?', [mergeCustomer.address, keep])

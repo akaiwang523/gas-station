@@ -45,9 +45,11 @@ export async function listOrders(req: Request, res: Response) {
     // 客戶姓名/電話搜尋要在資料庫層先篩選，篩選完才套用筆數上限——
     // 不然像「訂單查詢」那種不指定日期、單純搜客戶名字的用法，會先被 LIMIT 砍到只剩最近 N 筆
     // 全部客戶混在一起的訂單，這位客戶比較久以前的訂單就會憑空從搜尋結果消失
-    conditions.push('(c.name LIKE ? OR c.phone LIKE ? OR c.phone2 LIKE ?)')
+    conditions.push(`(c.name LIKE ? OR c.phone LIKE ? OR c.phone2 LIKE ? OR EXISTS (
+      SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone LIKE ?
+    ))`)
     const kw = `%${customerSearch}%`
-    params.push(kw, kw, kw)
+    params.push(kw, kw, kw, kw)
   }
   if (!customerId) {
     if (upcoming) {

@@ -12,7 +12,7 @@ export default function ToastContainer() {
       {toasts.map(t => (
         <div
           key={t.id}
-          className={`px-4 py-3 rounded-xl shadow-lg text-white font-medium text-sm ${t.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}
+          className={`px-4 py-3 rounded-xl shadow-lg text-white font-medium text-sm ${t.type === 'success' ? 'bg-green-600' : t.type === 'info' ? 'bg-orange-500' : 'bg-red-600'}`}
         >
           {t.message}
         </div>

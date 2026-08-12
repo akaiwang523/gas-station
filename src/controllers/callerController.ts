@@ -1,11 +1,43 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
+import { normalizePhone } from '../lib/phone'
 
-function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-().]/g, '')
-  if (p.startsWith('+886')) p = '0' + p.slice(4)
-  if (p.startsWith('886') && p.length >= 10) p = '0' + p.slice(3)
-  return p
+// 客戶電話比對統一用這個 WHERE 片段：phone / phone2 兩個固定欄位，
+// 加上 customer_phones 這張「第三支以後」的電話表，三個地方都要一起查，
+// 缺一個都會出現「明明有登記，來電卻比對不到」的問題
+const PHONE_MATCH_SQL = `(c.phone = ? OR c.phone2 = ? OR EXISTS (
+  SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone = ?
+))`
+function phoneMatchParams(normalized: string): [string, string, string] {
+  return [normalized, normalized, normalized]
+}
+
+// 記一筆「再次來電」事件：前端用遞增 id 當游標輪詢，只要出現新事件就跳 toast，
+// 不管使用者當下在訂單頁、客戶頁還是報表頁都看得到，不會因為訂單本身沒變成新卡片而被忽略
+async function logRepeatCall(orderId: number, customerName: string, phone: string) {
+  await db.query(
+    'INSERT INTO repeat_call_events (order_id, customer_name, phone) VALUES (?, ?, ?)',
+    [orderId, customerName, phone]
+  )
+}
+
+// GET /api/caller/repeat-calls?afterId=N
+// 不帶 afterId：只回傳「目前最新的 id」讓前端當初始游標（避免一打開頁面就把歷史事件全部跳出來）
+// 帶 afterId：回傳 id 比它大的所有新事件
+export async function getRepeatCallEvents(req: Request, res: Response) {
+  const afterId = req.query.afterId ? Number(req.query.afterId) : null
+
+  if (afterId === null) {
+    const [rows] = await db.query('SELECT COALESCE(MAX(id), 0) as maxId FROM repeat_call_events') as any
+    return res.json({ events: [], cursor: rows[0].maxId })
+  }
+
+  const [rows] = await db.query(
+    'SELECT id, order_id as orderId, customer_name as customerName, phone, created_at as createdAt FROM repeat_call_events WHERE id > ? ORDER BY id ASC LIMIT 50',
+    [afterId]
+  ) as any
+  const cursor = rows.length > 0 ? rows[rows.length - 1].id : afterId
+  res.json({ events: rows, cursor })
 }
 
 // 共用單價邏輯：優先用客戶的特殊單價，沒有就用目前的基準價，都沒有才退回 800——
@@ -30,8 +62,8 @@ export async function lookupCaller(req: Request, res: Response) {
     `SELECT c.*, a.amount_owed, a.cylinders_owed 
      FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE (c.phone = ? OR c.phone2 = ?) AND c.status != 'INACTIVE' LIMIT 1`,
-    [normalized, normalized]
+     WHERE ${PHONE_MATCH_SQL} AND c.status != 'INACTIVE' LIMIT 1`,
+    phoneMatchParams(normalized)
   ) as any
 
   if (!rows[0]) return res.json({ found: false, phone: normalized, message: '新號碼，尚未建檔' })
@@ -55,7 +87,10 @@ export async function createFromCall(req: Request, res: Response) {
   if (!phone) return res.status(400).json({ error: 'phone required' })
 
   const normalized = normalizePhone(phone)
-  const [existing] = await db.query('SELECT id FROM customers WHERE phone = ? OR phone2 = ? LIMIT 1', [normalized, normalized]) as any
+  const [existing] = await db.query(
+    `SELECT id FROM customers c WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
+    phoneMatchParams(normalized)
+  ) as any
   if (existing[0]) return res.status(409).json({ error: '號碼已存在', customerId: existing[0].id })
 
   const [result] = await db.query(
@@ -88,8 +123,8 @@ export async function incomingCall(req: Request, res: Response) {
     `SELECT c.*, a.amount_owed, a.cylinders_owed 
      FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE (c.phone = ? OR c.phone2 = ?) AND c.status != 'INACTIVE' ORDER BY c.id ASC`,
-    [normalized, normalized]
+     WHERE ${PHONE_MATCH_SQL} AND c.status != 'INACTIVE' ORDER BY c.id ASC`,
+    phoneMatchParams(normalized)
   ) as any
 
   if (rows.length === 0) {
@@ -171,6 +206,7 @@ export async function incomingCall(req: Request, res: Response) {
       `UPDATE orders SET note = CONCAT(COALESCE(note, ''), '（再次來電 ', ?, '）'), updated_at = NOW() WHERE id = ?`,
       [new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' }), draftId]
     )
+    await logRepeatCall(draftId, c.name, normalized)
   } else {
     // 抓上一次「已送達」訂單的所有品項（原本用 JOIN + LIMIT 1，品項多筆時 JOIN 出多列會被 LIMIT 1 直接砍到只剩第一項，
     // 導致客戶明明訂 20kg+16kg 兩種，草稿卻只帶出其中一種——這裡先只鎖定訂單本身，再單獨撈出該筆訂單底下的全部品項）
@@ -468,16 +504,22 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
 
   // 確認這支號碼沒有被別的客戶佔用
   const [dup] = await db.query(
-    'SELECT id FROM customers WHERE (phone = ? OR phone2 = ?) AND id != ?',
-    [normalized, normalized, customerId]
+    `SELECT id FROM customers c WHERE ${PHONE_MATCH_SQL} AND id != ?`,
+    [...phoneMatchParams(normalized), customerId]
   ) as any
   if (dup[0]) return res.status(409).json({ error: '這支號碼已經綁定在其他客戶身上', customerId: dup[0].id })
 
-  // phone 欄位空的就填 phone，已經有值就填 phone2；兩個都有值就不覆蓋，直接沿用原號碼建單
+  // phone 欄位空的就填 phone，已經有值就填 phone2；兩個都有值就存進 customer_phones
+  // （之前兩個都有值時是直接放棄不存，這支號碼下次來電就又變回「陌生來電」）
   if (!c.phone) {
     await db.query('UPDATE customers SET phone = ? WHERE id = ?', [normalized, customerId])
   } else if (!c.phone2 && c.phone !== normalized) {
     await db.query('UPDATE customers SET phone2 = ? WHERE id = ?', [normalized, customerId])
+  } else if (c.phone !== normalized && c.phone2 !== normalized) {
+    await db.query(
+      'INSERT IGNORE INTO customer_phones (customer_id, phone) VALUES (?, ?)',
+      [customerId, normalized]
+    )
   }
 
   // 綁定前先撈這支號碼「第一次來電」的真實時間，之後建單要用這個當 call_time，
@@ -504,6 +546,7 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
   ) as any
 
   if (existingDrafts[0]) {
+    await logRepeatCall(existingDrafts[0].id, c.name, normalized)
     return res.json({ ok: true, orderId: existingDrafts[0].id, reused: true, customerId: Number(customerId) })
   }
 
@@ -566,6 +609,7 @@ export async function incomingCallById(req: Request, res: Response) {
   ) as any
 
   if (existingDrafts[0]) {
+    await logRepeatCall(existingDrafts[0].id, c.name, phone ? normalizePhone(phone) : c.phone)
     return res.json({ ok: true, orderId: existingDrafts[0].id, reused: true })
   }
 

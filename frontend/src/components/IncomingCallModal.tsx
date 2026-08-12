@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { api } from '../lib/api'
+import { showToast } from '../lib/toast'
 
 const POLL_INTERVAL = 4000
 
@@ -68,6 +69,9 @@ export default function IncomingCallModal() {
   // key 用 "draft-<id>" / "unknown-<id>" 區分，因為合併佇列後草稿跟陌生來電共用同一個 Set
   const deferredIds = useRef<Set<string>>(new Set())
   const token = localStorage.getItem('token')
+  // 再次來電 toast 通知的輪詢游標：null 代表還沒初始化，第一次拿到的是「目前最新 id」，
+  // 用它當起點，不會把過去累積的舊事件在剛打開頁面時一次全部跳出來
+  const repeatCallCursor = useRef<number | null>(null)
 
   useEffect(() => {
     api.getBaselinePrices()
@@ -165,6 +169,29 @@ export default function IncomingCallModal() {
     const timer = setInterval(poll, POLL_INTERVAL)
     return () => clearInterval(timer)
   }, [token, poll])
+
+  // 再次來電通知：跟建單彈窗的輪詢分開跑，因為即使今天已經有一張「已確認」的
+  // 待送單（不再是 DRAFT），再次來電還是要讓使用者知道——不能只靠上面那個
+  // 只抓 DRAFT/陌生來電佇列的 poll
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    async function pollRepeatCalls() {
+      try {
+        const res = await api.getRepeatCallEvents(repeatCallCursor.current)
+        if (cancelled) return
+        for (const ev of res.events || []) {
+          showToast(`🔁 再次來電：${ev.customerName}（${ev.phone}）`, 'info', 6000)
+        }
+        if (typeof res.cursor === 'number') repeatCallCursor.current = res.cursor
+      } catch {
+        // 靜默失敗，下一輪再試
+      }
+    }
+    pollRepeatCalls()
+    const timer = setInterval(pollRepeatCalls, POLL_INTERVAL)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [token])
 
   // 這支訂單維持在資料庫的 DRAFT 狀態，不打任何 API——只是先把這筆記起來跳過，
   // 立刻改顯示佇列裡下一筆還沒處理過的來電；這筆被稍後的還是留在「訂單」頁的
@@ -666,7 +693,7 @@ export default function IncomingCallModal() {
             onClick={handleDefer}
             disabled={loading}
             title="先擱著，之後到「訂單」頁的「來電草稿」清單再手動處理"
-            className="px-3 py-3 rounded-xl bg-gray-100 text-gray-500 font-medium text-xs whitespace-nowrap"
+            className="px-3 py-3 rounded-xl bg-gray-100 text-gray-500 font-medium text-base whitespace-nowrap"
           >
             📤 稍後
           </button>

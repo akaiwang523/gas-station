@@ -182,11 +182,13 @@ export async function handleLineWebhook(req: Request, res: Response) {
       // 等待綁定電話號碼
       if (userState[userId]?.step === 'waiting_phone') {
         const phone = text.replace(/[^\d]/g, '')
-        // 主電話跟副電話都要比對到——客戶原本可能是登記在副電話（phone2）欄位，
-        // 只查主電話會誤判成新客戶、多開一筆重複資料
+        // 主電話、副電話、customer_phones 三個地方都要比對到——客戶原本可能登記在
+        // 副電話或第三支以後的電話，只查主電話會誤判成新客戶、多開一筆重複資料
         const [rows] = await db.query(
-          `SELECT id, name FROM customers WHERE (phone = ? OR phone2 = ?) AND status = 'ACTIVE'`,
-          [phone, phone]
+          `SELECT id, name FROM customers c WHERE (c.phone = ? OR c.phone2 = ? OR EXISTS (
+            SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone = ?
+          )) AND c.status = 'ACTIVE'`,
+          [phone, phone, phone]
         ) as any
         if (rows.length === 0) {
           userState[userId] = { step: 'waiting_name', phone }

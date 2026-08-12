@@ -113,6 +113,8 @@ export const api = {
     request(`/caller/draft/${id}/confirm`, { method: 'POST', body: JSON.stringify(data) }),
   cancelDraft: (id: number) =>
     request(`/caller/draft/${id}`, { method: 'DELETE' }),
+  getRepeatCallEvents: (afterId: number | null) =>
+    request(`/caller/repeat-calls${afterId !== null ? `?afterId=${afterId}` : ''}`),
   deactivateCustomer: (id: number) =>
     request(`/customers/${id}/deactivate`, { method: 'PATCH' }),
   hardDeleteCustomer: (id: number) =>

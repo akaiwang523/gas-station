@@ -64,6 +64,8 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
     delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
   })
   const [deliveryDays, setDeliveryDays] = useState<number[]>([])
+  // 第三支以後的電話（phone/phone2 兩個固定欄位裝不下，超過的存這裡，數量不限）
+  const [extraPhones, setExtraPhones] = useState<string[]>([])
   const [showFixedDelivery, setShowFixedDelivery] = useState(false)
   // 固定配送品項：一位客戶可以設好幾種瓦斯類型各自的配送數量（例如 20kg 兩桶＋16kg 一桶）
   const [fixedItems, setFixedItems] = useState<FixedItem[]>([{ ...EMPTY_FIXED_ITEM }])
@@ -88,6 +90,16 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
   }
   function removeFixedItem(idx: number) {
     setFixedItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)
+  }
+
+  function updateExtraPhone(idx: number, value: string) {
+    setExtraPhones(prev => prev.map((p, i) => i === idx ? value : p))
+  }
+  function addExtraPhone() {
+    setExtraPhones(prev => [...prev, ''])
+  }
+  function removeExtraPhone(idx: number) {
+    setExtraPhones(prev => prev.filter((_, i) => i !== idx))
   }
 
   function closeForm() {
@@ -129,6 +141,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
       delivery_cycle: 'ON_CALL', default_order_quantity: '', default_unit_price: ''
     })
     setDeliveryDays([])
+    setExtraPhones([])
     setShowFixedDelivery(false)
     setFixedItems([{ ...EMPTY_FIXED_ITEM }])
     setEditId(null)
@@ -164,6 +177,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
         ? full.fixedItems.map((it: any) => ({ gasType: it.gasType, quantity: String(it.quantity) }))
         : [{ ...EMPTY_FIXED_ITEM }]
     )
+    setExtraPhones(full.extraPhones && full.extraPhones.length > 0 ? full.extraPhones : [])
     setEditId(c.id)
     setShowForm(true)
     setLinkSearchOpen(false)
@@ -180,6 +194,7 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
         customerType: form.customer_type || 'UNKNOWN',
         priceOverride: form.price_override ? Number(form.price_override) : null,
         gasType: form.gas_type,
+        extraPhones: extraPhones.map(p => p.trim()).filter(Boolean),
       }
       if (showFixedDelivery) {
         const validItems = fixedItems
@@ -460,6 +475,51 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
               { label: '姓名 *', key: 'name', placeholder: '客戶姓名或店名' },
               { label: '電話 *', key: 'phone', placeholder: '0912345678' },
               { label: '電話2', key: 'phone2', placeholder: '備用電話（選填）' },
+            ].map(f => (
+              <div key={f.key}>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{f.label}</label>
+                <input
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  placeholder={f.placeholder}
+                  value={(form as any)[f.key]}
+                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                />
+              </div>
+            ))}
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">其他電話</label>
+                <button type="button" onClick={addExtraPhone} className="text-orange-500 text-xs font-medium">
+                  ＋ 新增電話
+                </button>
+              </div>
+              {extraPhones.length === 0 ? (
+                <div className="text-xs text-gray-400">電話 1、電話2 不夠用時，這裡可以再加任意支</div>
+              ) : (
+                <div className="space-y-2">
+                  {extraPhones.map((p, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <input
+                        className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        placeholder="0912345678"
+                        value={p}
+                        onChange={e => updateExtraPhone(idx, e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeExtraPhone(idx)}
+                        className="px-3 rounded-xl bg-gray-100 text-gray-500"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {[
               { label: '地址 *', key: 'address', placeholder: '完整地址' },
               { label: '區域', key: 'district', placeholder: '例：中西區、東區' },
               { label: '特殊單價', key: 'price_override', placeholder: '留空使用預設價格' },

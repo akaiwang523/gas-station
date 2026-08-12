@@ -34,3 +34,22 @@ CREATE TABLE IF NOT EXISTS prediction_history (
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
   INDEX idx_customer_unresolved (customer_id, actual_order_id)
 );
+
+-- prediction_history 補上 days_per_bottle 欄位（migrate.sql 早就有寫，但正式環境資料庫
+-- 沒有真的執行過這行 ALTER，導致 getPredictions 寫入歷史紀錄時一直報
+-- Unknown column 'days_per_bottle' 錯誤，訂單功能不受影響，只是預測記錄一直寫不進去）
+ALTER TABLE prediction_history
+  ADD COLUMN IF NOT EXISTS days_per_bottle DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER predicted_at;
+
+-- 客戶第三支以後的電話：phone / phone2 兩個固定欄位裝不下超過兩支電話的店家，
+-- 這張表不限筆數，來電比對（callerController）、客戶搜尋（orderController）、
+-- LINE 綁定（lineController）都會一起查這張表
+CREATE TABLE IF NOT EXISTS customer_phones (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  phone VARCHAR(20) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT NOW(),
+  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_customer_phone (customer_id, phone),
+  INDEX idx_phone (phone)
+);
