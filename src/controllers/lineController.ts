@@ -137,6 +137,25 @@ function dateMenu(gasType: string, qty: number) {
   }
 }
 
+// 選好規格數量之後的「何時要」選單：取代直接跳「選日期」再「選時段」共兩步，
+// 大多數人其實就是要「今天盡快」，這裡直接給一個一鍵完成的快速選項，
+// 真的有指定日期/時段需求的人再點下面那個走原本的兩步流程
+function whenMenu(gasType: string, qty: number) {
+  return {
+    type: 'template',
+    altText: '請選擇配送時間',
+    template: {
+      type: 'buttons',
+      title: '什麼時候要？',
+      text: '大部分人選「盡快」就可以了',
+      actions: [
+        { type: 'postback', label: '⚡ 盡快（今天）', data: `action=quick_when&type=${gasType}&qty=${qty}` },
+        { type: 'postback', label: '📅 指定日期/時段', data: `action=want_schedule&type=${gasType}&qty=${qty}` }
+      ]
+    }
+  }
+}
+
 // 時段選單
 function timeSlotMenu(gasType: string, qty: number, dateChoice: string) {
   return {
@@ -247,7 +266,7 @@ export async function handleLineWebhook(req: Request, res: Response) {
         }
         const gasType = userState[userId].gasType
         userState[userId] = { step: 'waiting_date_select', gasType, qty }
-        await replyMessage(replyToken, [dateMenu(gasType, qty)])
+        await replyMessage(replyToken, [whenMenu(gasType, qty)])
         continue
       }
 
@@ -301,6 +320,20 @@ export async function handleLineWebhook(req: Request, res: Response) {
       }
 
       else if (action === 'quantity') {
+        const gasType = params.get('type')!
+        const qty = parseInt(params.get('qty')!)
+        userState[userId] = { step: 'waiting_date_select', gasType, qty }
+        await replyMessage(replyToken, [whenMenu(gasType, qty)])
+      }
+
+      else if (action === 'quick_when') {
+        const gasType = params.get('type')!
+        const qty = parseInt(params.get('qty')!)
+        userState[userId] = {}
+        await createLineOrder(userId, replyToken, gasType, qty, '盡快配送')
+      }
+
+      else if (action === 'want_schedule') {
         const gasType = params.get('type')!
         const qty = parseInt(params.get('qty')!)
         userState[userId] = { step: 'waiting_date_select', gasType, qty }
@@ -486,9 +519,21 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
       [orderId, gasType, qty, unitPrice, totalAmount]
     )
     await conn.commit()
+    const gasLabel = gasType.replace('BOTTLED_', '').replace('KG', 'kg')
+    // LINE buttons template 的 text 欄位有長度上限，「指定時間」的自訂輸入是使用者自己打的字、
+    // 長度不受控，這裡截短一下避免超過上限導致整則訊息送不出去
+    const timeSlotDisplay = timeSlot.length > 30 ? timeSlot.slice(0, 30) + '…' : timeSlot
     await replyMessage(replyToken, [{
-      type: 'text',
-      text: `✅ 訂單已收到！\n\n規格：${gasType.replace('BOTTLED_','').replace('KG','kg')} × ${qty} 桶\n配送時段：${timeSlot}\n\n我們將盡快為您配送，謝謝！`
+      type: 'template',
+      altText: `訂單已收到：${gasLabel} × ${qty} 桶`,
+      template: {
+        type: 'buttons',
+        title: '✅ 訂單已收到',
+        text: `${gasLabel} × ${qty} 桶\n${timeSlotDisplay}`,
+        actions: [
+          { type: 'postback', label: '📋 查詢訂單狀態', data: 'action=status' }
+        ]
+      }
     }])
   } catch (err) {
     await conn.rollback()
