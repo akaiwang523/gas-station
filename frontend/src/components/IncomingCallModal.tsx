@@ -65,6 +65,7 @@ export default function IncomingCallModal() {
 
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
+  const shownUnknownId = useRef<number | null>(null)
   // 按過「稍後」的項目，暫時跳過它、換下一筆顯示，而不是整個佇列卡住等這筆被處理完
   // key 用 "draft-<id>" / "unknown-<id>" 區分，因為合併佇列後草稿跟陌生來電共用同一個 Set
   const deferredIds = useRef<Set<string>>(new Set())
@@ -121,6 +122,7 @@ export default function IncomingCallModal() {
         if (nextDraft.id !== shownDraftId.current) {
           shownDraftId.current = nextDraft.id
           shownUnknownPhone.current = null
+          shownUnknownId.current = null
           setDraft(nextDraft)
           setUnknownPhone(null)
           setPaymentType(nextDraft.paymentType === 'AR' ? 'AR' : 'CASH')
@@ -138,6 +140,7 @@ export default function IncomingCallModal() {
         const nextUnknown = nextItem.unknownCall
         if (nextUnknown.phone !== shownUnknownPhone.current) {
           shownUnknownPhone.current = nextUnknown.phone
+          shownUnknownId.current = nextUnknown.id
           shownDraftId.current = null
           setUnknownPhone(nextUnknown.phone)
           setMatchedCustomers(nextUnknown.matchedCustomers || [])
@@ -155,6 +158,7 @@ export default function IncomingCallModal() {
         // 目前沒有任何「還沒被稍後」的待處理草稿/陌生來電，重設記錄，避免漏接下一筆新進來的同 ID 情況
         shownDraftId.current = null
         shownUnknownPhone.current = null
+        shownUnknownId.current = null
         setVisible(false)
         setDraft(null)
       }
@@ -378,6 +382,21 @@ export default function IncomingCallModal() {
     }
   }
 
+  // 陌生來電的「稍後」：純前端跳過，不打任何 API——不會建立客戶、不會建單，
+  // 這通來電還是留在佇列裡（PENDING），下次輪到它或重新整理頁面時還會再跳出來，
+  // 適合「不確定是不是要叫瓦斯、要問過老闆再說」的狀況，不會像「新增並建單」那樣
+  // 先把電話存進客戶名單，事後才發現不是真客戶還要跑去客戶管理刪除
+  function handleDeferUnknown() {
+    if (shownUnknownId.current == null) return
+    deferredIds.current.add(`unknown-${shownUnknownId.current}`)
+    setVisible(false)
+    setUnknownPhone(null)
+    setMatchedCustomers([])
+    shownUnknownPhone.current = null
+    shownUnknownId.current = null
+    poll()
+  }
+
   async function handleDismiss() {
     if (unknownPhone) {
       // 找到對應的 unknown_calls id 並標記已處理，避免下次輪詢又跳出來
@@ -473,9 +492,17 @@ export default function IncomingCallModal() {
                 </div>
               </div>
 
-              <div className="px-5 pb-5 flex gap-3">
+              <div className="px-5 pb-5 flex gap-2">
                 <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
                   略過
+                </button>
+                <button
+                  onClick={handleDeferUnknown}
+                  disabled={loading}
+                  title="不確定是不是要叫瓦斯？先擱著，不會建立客戶資料"
+                  className="px-3 py-3 rounded-xl bg-gray-100 text-gray-500 font-medium text-base whitespace-nowrap"
+                >
+                  📤 稍後
                 </button>
                 <button onClick={handleCreateAndOrder} disabled={loading} className="flex-[2] py-3 rounded-xl bg-orange-500 text-white font-bold">
                   ➕ 新增並建單
@@ -530,9 +557,17 @@ export default function IncomingCallModal() {
                 </div>
               </div>
 
-              <div className="px-5 pb-5">
-                <button onClick={handleDismiss} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+              <div className="px-5 pb-5 flex gap-2">
+                <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
                   略過
+                </button>
+                <button
+                  onClick={handleDeferUnknown}
+                  disabled={loading}
+                  title="不確定是不是要叫瓦斯？先擱著，不會建立客戶資料"
+                  className="px-3 py-3 rounded-xl bg-gray-100 text-gray-500 font-medium text-base whitespace-nowrap"
+                >
+                  📤 稍後
                 </button>
               </div>
             </>
