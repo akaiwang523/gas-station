@@ -161,6 +161,24 @@ function dateMenu() {
   }
 }
 
+// 時段選單：日期選完之後再問一次，一樣是整張訂單共用，不分品項各自問
+function timeSlotMenu() {
+  return {
+    type: 'template',
+    altText: '請選擇配送時段',
+    template: {
+      type: 'buttons',
+      title: '選擇配送時段',
+      text: '請選擇希望的配送時段',
+      actions: [
+        { type: 'postback', label: '上午', data: 'action=order_timeslot&slot=上午' },
+        { type: 'postback', label: '中午', data: 'action=order_timeslot&slot=中午' },
+        { type: 'postback', label: '傍晚', data: 'action=order_timeslot&slot=傍晚' }
+      ]
+    }
+  }
+}
+
 export async function handleLineWebhook(req: Request, res: Response) {
   const signature = req.headers['x-line-signature'] as string
   const rawBody = JSON.stringify(req.body)
@@ -330,16 +348,30 @@ export async function handleLineWebhook(req: Request, res: Response) {
         }
       }
 
-      // 選好配送日期，購物車裡累積的所有品項合併成一張訂單一次送出
+      // 選好配送日期，再問一次時段，購物車跟日期先記著
       else if (action === 'order_date') {
         const cart = userState[userId]?.cart || []
         const dateChoice = params.get('date')!
+        if (cart.length === 0) {
+          userState[userId] = {}
+          await replyMessage(replyToken, [{ type: 'text', text: '購物車是空的，請重新開始下單：' }, mainMenu()])
+        } else {
+          userState[userId] = { cart, dateChoice }
+          await replyMessage(replyToken, [timeSlotMenu()])
+        }
+      }
+
+      // 選好時段，購物車裡累積的所有品項合併成一張訂單一次送出
+      else if (action === 'order_timeslot') {
+        const cart = userState[userId]?.cart || []
+        const dateChoice = userState[userId]?.dateChoice || 'today'
+        const slot = params.get('slot')!
         userState[userId] = {}
         if (cart.length === 0) {
           await replyMessage(replyToken, [{ type: 'text', text: '購物車是空的，請重新開始下單：' }, mainMenu()])
         } else {
           const { scheduledDate, label } = resolveDateChoice(dateChoice)
-          await createLineOrder(userId, replyToken, cart, scheduledDate, label)
+          await createLineOrder(userId, replyToken, cart, scheduledDate, `${label} ${slot}`)
         }
       }
 
