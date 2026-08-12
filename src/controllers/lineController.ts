@@ -96,7 +96,31 @@ function quantityMenu(gasType: string) {
   }
 }
 
-// 日期選單：今天/明天/後天，讓 LINE 訂單也能像來電草稿一樣預約未來的配送日
+// 選好一種規格的數量之後，問要不要再加其他規格（例如 20kg 兩桶 + 16kg 一桶），
+// 不用像以前那樣一種規格要整個流程重跑一次、變成兩張分開的訂單——
+// 全部品項會併成同一張訂單一次送出。使用者按過「什麼時候要」拿掉了，
+// 一律當「今天盡快」處理，不用另外問
+function moreItemsMenu() {
+  return {
+    type: 'template',
+    altText: '還需要其他規格嗎？',
+    template: {
+      type: 'buttons',
+      title: '還需要其他規格嗎？',
+      text: '可以一次訂好幾種規格',
+      actions: [
+        { type: 'postback', label: '➕ 再加一種規格', data: 'action=add_more' },
+        { type: 'postback', label: '✅ 完成，送出訂單', data: 'action=submit_cart' }
+      ]
+    }
+  }
+}
+
+// 使用者狀態暫存（記憶對話狀態）
+const userState: Record<string, any> = {}
+
+// 日期選單：今天/明天/後天。品項都選完（購物車確定）之後才問一次，
+// 因為配送日是整張訂單共用的，不是每種規格各自選一次
 const DATE_CHOICE_OFFSET: Record<string, number> = { today: 0, tomorrow: 1, dayafter: 2 }
 const DATE_CHOICE_LABEL: Record<string, string> = { today: '今天', tomorrow: '明天', dayafter: '後天' }
 
@@ -120,7 +144,7 @@ function resolveDateChoice(dateChoice: string): { scheduledDate: string | null, 
   return { scheduledDate: offset === 0 ? null : dateStr, label }
 }
 
-function dateMenu(gasType: string, qty: number) {
+function dateMenu() {
   return {
     type: 'template',
     altText: '請選擇配送日期',
@@ -129,54 +153,13 @@ function dateMenu(gasType: string, qty: number) {
       title: '選擇配送日期',
       text: '請選擇希望的配送日期',
       actions: [
-        { type: 'postback', label: '今天', data: `action=date&type=${gasType}&qty=${qty}&date=today` },
-        { type: 'postback', label: '明天', data: `action=date&type=${gasType}&qty=${qty}&date=tomorrow` },
-        { type: 'postback', label: '後天', data: `action=date&type=${gasType}&qty=${qty}&date=dayafter` }
+        { type: 'postback', label: '今天', data: 'action=order_date&date=today' },
+        { type: 'postback', label: '明天', data: 'action=order_date&date=tomorrow' },
+        { type: 'postback', label: '後天', data: 'action=order_date&date=dayafter' }
       ]
     }
   }
 }
-
-// 選好規格數量之後的「何時要」選單：取代直接跳「選日期」再「選時段」共兩步，
-// 大多數人其實就是要「今天盡快」，這裡直接給一個一鍵完成的快速選項，
-// 真的有指定日期/時段需求的人再點下面那個走原本的兩步流程
-function whenMenu(gasType: string, qty: number) {
-  return {
-    type: 'template',
-    altText: '請選擇配送時間',
-    template: {
-      type: 'buttons',
-      title: '什麼時候要？',
-      text: '大部分人選「盡快」就可以了',
-      actions: [
-        { type: 'postback', label: '⚡ 盡快（今天）', data: `action=quick_when&type=${gasType}&qty=${qty}` },
-        { type: 'postback', label: '📅 指定日期/時段', data: `action=want_schedule&type=${gasType}&qty=${qty}` }
-      ]
-    }
-  }
-}
-
-// 時段選單
-function timeSlotMenu(gasType: string, qty: number, dateChoice: string) {
-  return {
-    type: 'template',
-    altText: '請選擇配送時段',
-    template: {
-      type: 'buttons',
-      title: '選擇配送時段',
-      text: '請選擇希望的配送時段',
-      actions: [
-        { type: 'postback', label: '上午 9-12 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=上午9-12點` },
-        { type: 'postback', label: '下午 12-17 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=下午12-17點` },
-        { type: 'postback', label: '傍晚 17-20 點', data: `action=timeslot&type=${gasType}&qty=${qty}&date=${dateChoice}&slot=傍晚17-20點` },
-        { type: 'postback', label: '指定時間', data: `action=timeslot_custom&type=${gasType}&qty=${qty}&date=${dateChoice}` }
-      ]
-    }
-  }
-}
-
-// 使用者狀態暫存（記憶對話狀態）
-const userState: Record<string, any> = {}
 
 export async function handleLineWebhook(req: Request, res: Response) {
   const signature = req.headers['x-line-signature'] as string
@@ -265,17 +248,9 @@ export async function handleLineWebhook(req: Request, res: Response) {
           continue
         }
         const gasType = userState[userId].gasType
-        userState[userId] = { step: 'waiting_date_select', gasType, qty }
-        await replyMessage(replyToken, [whenMenu(gasType, qty)])
-        continue
-      }
-
-      // 等待自訂時間
-      if (userState[userId]?.step === 'waiting_time') {
-        const { gasType, qty, dateChoice } = userState[userId]
-        userState[userId] = {}
-        const { scheduledDate, label } = resolveDateChoice(dateChoice)
-        await createLineOrder(userId, replyToken, gasType, qty, `${label} 指定時間：${text}`, scheduledDate)
+        const cart = [...(userState[userId].cart || []), { gasType, qty }]
+        userState[userId] = { step: 'cart_more', cart }
+        await replyMessage(replyToken, [moreItemsMenu()])
         continue
       }
 
@@ -309,67 +284,63 @@ export async function handleLineWebhook(req: Request, res: Response) {
           userState[userId] = { step: 'waiting_phone' }
           await replyMessage(replyToken, [{ type: 'text', text: '請先輸入您的電話號碼進行綁定：' }])
         } else {
+          userState[userId] = { cart: [] }
           await replyMessage(replyToken, [gasTypeMenu()])
         }
       }
 
       else if (action === 'gas_type') {
         const gasType = params.get('type')!
-        userState[userId] = { step: 'waiting_qty_select', gasType }
+        const cart = userState[userId]?.cart || []
+        userState[userId] = { step: 'waiting_qty_select', gasType, cart }
         await replyMessage(replyToken, [quantityMenu(gasType)])
       }
 
       else if (action === 'quantity') {
         const gasType = params.get('type')!
         const qty = parseInt(params.get('qty')!)
-        userState[userId] = { step: 'waiting_date_select', gasType, qty }
-        await replyMessage(replyToken, [whenMenu(gasType, qty)])
-      }
-
-      else if (action === 'quick_when') {
-        const gasType = params.get('type')!
-        const qty = parseInt(params.get('qty')!)
-        userState[userId] = {}
-        await createLineOrder(userId, replyToken, gasType, qty, '盡快配送')
-      }
-
-      else if (action === 'want_schedule') {
-        const gasType = params.get('type')!
-        const qty = parseInt(params.get('qty')!)
-        userState[userId] = { step: 'waiting_date_select', gasType, qty }
-        await replyMessage(replyToken, [dateMenu(gasType, qty)])
+        const cart = [...(userState[userId]?.cart || []), { gasType, qty }]
+        userState[userId] = { step: 'cart_more', cart }
+        await replyMessage(replyToken, [moreItemsMenu()])
       }
 
       else if (action === 'quantity_custom') {
         const gasType = params.get('type')!
-        userState[userId] = { step: 'waiting_qty', gasType }
+        const cart = userState[userId]?.cart || []
+        userState[userId] = { step: 'waiting_qty', gasType, cart }
         await replyMessage(replyToken, [{ type: 'text', text: '請輸入您需要的桶數：' }])
       }
 
-      else if (action === 'date') {
-        const gasType = params.get('type')!
-        const qty = parseInt(params.get('qty')!)
+      // 還要再加一種規格：回到規格選單，購物車內容留著繼續累加
+      else if (action === 'add_more') {
+        const cart = userState[userId]?.cart || []
+        userState[userId] = { cart }
+        await replyMessage(replyToken, [gasTypeMenu()])
+      }
+
+      // 完成，購物車裡的品項先記著，問一次配送日期再真的送出
+      else if (action === 'submit_cart') {
+        const cart = userState[userId]?.cart || []
+        if (cart.length === 0) {
+          userState[userId] = {}
+          await replyMessage(replyToken, [{ type: 'text', text: '還沒有選擇任何品項喔，請重新開始下單：' }, mainMenu()])
+        } else {
+          userState[userId] = { cart }
+          await replyMessage(replyToken, [dateMenu()])
+        }
+      }
+
+      // 選好配送日期，購物車裡累積的所有品項合併成一張訂單一次送出
+      else if (action === 'order_date') {
+        const cart = userState[userId]?.cart || []
         const dateChoice = params.get('date')!
         userState[userId] = {}
-        await replyMessage(replyToken, [timeSlotMenu(gasType, qty, dateChoice)])
-      }
-
-      else if (action === 'timeslot') {
-        const gasType = params.get('type')!
-        const qty = parseInt(params.get('qty')!)
-        const slot = params.get('slot')!
-        const dateChoice = params.get('date') || 'today'
-        userState[userId] = {}
-        const { scheduledDate, label } = resolveDateChoice(dateChoice)
-        await createLineOrder(userId, replyToken, gasType, qty, `${label} ${slot}`, scheduledDate)
-      }
-
-      else if (action === 'timeslot_custom') {
-        const gasType = params.get('type')!
-        const qty = parseInt(params.get('qty')!)
-        const dateChoice = params.get('date') || 'today'
-        userState[userId] = { step: 'waiting_time', gasType, qty, dateChoice }
-        await replyMessage(replyToken, [{ type: 'text', text: '請輸入希望的配送時間（例如：17:00）：' }])
+        if (cart.length === 0) {
+          await replyMessage(replyToken, [{ type: 'text', text: '購物車是空的，請重新開始下單：' }, mainMenu()])
+        } else {
+          const { scheduledDate, label } = resolveDateChoice(dateChoice)
+          await createLineOrder(userId, replyToken, cart, scheduledDate, label)
+        }
       }
 
       else if (action === 'status') {
@@ -440,22 +411,25 @@ export async function handleLineWebhook(req: Request, res: Response) {
           await replyMessage(replyToken, [{ type: 'text', text: '請先輸入您的電話號碼進行綁定：' }])
         } else {
           const customerId = binding[0].customer_id
-          const [lastOrders] = await db.query(
-            `SELECT oi.gas_type, oi.quantity
-             FROM orders o
-             LEFT JOIN order_items oi ON oi.order_id = o.id
-             WHERE o.customer_id = ? AND o.status != 'CANCELLED'
-             ORDER BY o.created_at DESC LIMIT 1`,
+          // 先找出上一張訂單的 id，再單獨撈出該筆訂單底下的全部品項——
+          // 不能直接 JOIN 完再 LIMIT 1，上一單如果有好幾種規格，LIMIT 1 會把其他品項砍掉，
+          // 一鍵再訂就只會訂到其中一種規格
+          const [lastOrderRows] = await db.query(
+            `SELECT id FROM orders WHERE customer_id = ? AND status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1`,
             [customerId]
           ) as any
-          if (lastOrders.length === 0 || !lastOrders[0].gas_type) {
+          const lastOrderId = lastOrderRows[0]?.id
+          const lastItems = lastOrderId
+            ? (await db.query(`SELECT gas_type, quantity FROM order_items WHERE order_id = ?`, [lastOrderId]) as any)[0]
+            : []
+          if (!lastItems.length) {
             await replyMessage(replyToken, [
               { type: 'text', text: '您還沒有歷史訂單可以複製，請改用「我要叫瓦斯」下單：' },
               mainMenu()
             ])
           } else {
-            const { gas_type, quantity } = lastOrders[0]
-            await createLineOrder(userId, replyToken, gas_type, quantity, '盡快配送（一鍵再訂）')
+            const cart = lastItems.map((i: any) => ({ gasType: i.gas_type, qty: i.quantity }))
+            await createLineOrder(userId, replyToken, cart)
           }
         }
       }
@@ -486,7 +460,11 @@ export async function handleLineWebhook(req: Request, res: Response) {
   }
 }
 
-async function createLineOrder(userId: string, replyToken: string, gasType: string, qty: number, timeSlot: string, scheduledDate: string | null = null) {
+// items：一張訂單裡的所有品項（可能不只一種規格）；scheduledDate/dateLabel 是配送日期
+async function createLineOrder(
+  userId: string, replyToken: string, items: { gasType: string; qty: number }[],
+  scheduledDate: string | null = null, dateLabel: string = '今天'
+) {
   const [binding] = await db.query(
     `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
   ) as any
@@ -496,14 +474,25 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
   const [customers] = await db.query(
     `SELECT price_override FROM customers WHERE id = ?`, [customerId]
   ) as any
+  const priceOverride = customers[0]?.price_override || null
+
   // 單價統一跟其他進單管道（快速接單/來電草稿/固定配送自動建單）同一套邏輯：
-  // 優先用客戶的特殊單價，沒有就用目前的基準價，不使用已經停用的 default_unit_price 欄位
+  // 優先用客戶的特殊單價，沒有就用目前的基準價，不使用已經停用的 default_unit_price 欄位。
+  // 每個品項各自的基準價不同，一次撈全部再逐項查表
   const [baselineRows] = await db.query(
-    `SELECT \`value\` FROM settings WHERE \`key\` = ?`, [`baseline_price_${gasType}`]
+    `SELECT \`key\`, \`value\` FROM settings WHERE \`key\` LIKE 'baseline_price_%'`
   ) as any
-  const baselinePrice = baselineRows[0] ? Number(baselineRows[0].value) : 800
-  const unitPrice = customers[0]?.price_override || baselinePrice
-  const totalAmount = qty * unitPrice
+  const baselinePrice: Record<string, number> = {}
+  for (const row of baselineRows) baselinePrice[row.key.replace('baseline_price_', '')] = Number(row.value)
+
+  const priced = items.map(it => {
+    const unitPrice = priceOverride || baselinePrice[it.gasType] || 800
+    return { ...it, unitPrice, subtotal: it.qty * unitPrice }
+  })
+  const totalQuantity = priced.reduce((s, it) => s + it.qty, 0)
+  const totalAmount = priced.reduce((s, it) => s + it.subtotal, 0)
+  // 主表 unit_price 是舊資料相容用的加權平均，實際品項明細以 order_items 為準
+  const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
 
   const conn = await db.getConnection()
   try {
@@ -511,25 +500,29 @@ async function createLineOrder(userId: string, replyToken: string, gasType: stri
     const [result] = await conn.query(
       `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source, scheduled_date)
        VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'LINE', ?)`,
-      [customerId, qty, unitPrice, totalAmount, `LINE預訂 / ${timeSlot}`, scheduledDate]
+      [customerId, totalQuantity, avgUnitPrice, totalAmount, `LINE預訂 / ${dateLabel}`, scheduledDate]
     ) as any
     const orderId = result.insertId
-    await conn.query(
-      `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
-      [orderId, gasType, qty, unitPrice, totalAmount]
-    )
+    for (const it of priced) {
+      await conn.query(
+        `INSERT INTO order_items (order_id, gas_type, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)`,
+        [orderId, it.gasType, it.qty, it.unitPrice, it.subtotal]
+      )
+    }
     await conn.commit()
-    const gasLabel = gasType.replace('BOTTLED_', '').replace('KG', 'kg')
-    // LINE buttons template 的 text 欄位有長度上限，「指定時間」的自訂輸入是使用者自己打的字、
-    // 長度不受控，這裡截短一下避免超過上限導致整則訊息送不出去
-    const timeSlotDisplay = timeSlot.length > 30 ? timeSlot.slice(0, 30) + '…' : timeSlot
+    const itemsSummary = priced
+      .map(it => `${it.gasType.replace('BOTTLED_', '').replace('KG', 'kg')} × ${it.qty}`)
+      .join('、')
+    // LINE buttons template 的 text 欄位有長度上限，品項種類多的話組合起來的字串長度不受控，
+    // 這裡截短一下避免超過上限導致整則訊息送不出去
+    const itemsDisplay = itemsSummary.length > 40 ? itemsSummary.slice(0, 40) + '…' : itemsSummary
     await replyMessage(replyToken, [{
       type: 'template',
-      altText: `訂單已收到：${gasLabel} × ${qty} 桶`,
+      altText: `訂單已收到：${itemsSummary}`,
       template: {
         type: 'buttons',
         title: '✅ 訂單已收到',
-        text: `${gasLabel} × ${qty} 桶\n${timeSlotDisplay}`,
+        text: `${itemsDisplay}\n${dateLabel}`,
         actions: [
           { type: 'postback', label: '📋 查詢訂單狀態', data: 'action=status' }
         ]
