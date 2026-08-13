@@ -1,16 +1,6 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
-import { normalizePhone } from '../lib/phone'
-
-// 客戶電話比對統一用這個 WHERE 片段：phone / phone2 兩個固定欄位，
-// 加上 customer_phones 這張「第三支以後」的電話表，三個地方都要一起查，
-// 缺一個都會出現「明明有登記，來電卻比對不到」的問題
-const PHONE_MATCH_SQL = `(c.phone = ? OR c.phone2 = ? OR EXISTS (
-  SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone = ?
-))`
-function phoneMatchParams(normalized: string): [string, string, string] {
-  return [normalized, normalized, normalized]
-}
+import { normalizePhone, PHONE_MATCH_SQL, phoneMatchParams } from '../lib/phone'
 
 // 記一筆「再次來電」事件：前端用遞增 id 當游標輪詢，只要出現新事件就跳 toast，
 // 不管使用者當下在訂單頁、客戶頁還是報表頁都看得到，不會因為訂單本身沒變成新卡片而被忽略

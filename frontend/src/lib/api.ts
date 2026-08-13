@@ -29,7 +29,9 @@ async function request(path: string, options: RequestInit = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '發生錯誤')
+    const e = new Error(err.error || '發生錯誤') as Error & Record<string, any>
+    Object.assign(e, err)
+    throw e
   }
   return res.json()
 }

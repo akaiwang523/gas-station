@@ -1,6 +1,20 @@
 import { Request, Response } from 'express'
 import { db } from '../lib/db'
-import { normalizePhone } from '../lib/phone'
+import { normalizePhone, PHONE_MATCH_SQL, phoneMatchParams } from '../lib/phone'
+
+// 查這支電話目前是不是已經登記在別的（非停用）客戶身上——
+// 手動新增/編輯客戶時要用這個擋下「同一支電話重複建檔」，理由跟來電比對一樣：
+// 「白妞文賢」跟孤兒客戶「來電 0983779091」共用同一支電話，就是因為當初新增客戶
+// 完全沒做這個檢查。excludeId 是編輯時排除自己，不然自己跟自己比對永遠會撞到。
+async function findPhoneOwner(normalized: string, excludeId?: number): Promise<{ id: number; name: string } | null> {
+  const excludeClause = excludeId ? 'AND c.id != ?' : ''
+  const params = excludeId ? [...phoneMatchParams(normalized), excludeId] : phoneMatchParams(normalized)
+  const [rows] = await db.query(
+    `SELECT c.id, c.name FROM customers c WHERE ${PHONE_MATCH_SQL} AND c.status != 'INACTIVE' ${excludeClause} LIMIT 1`,
+    params
+  ) as any
+  return rows[0] || null
+}
 
 export async function listCustomers(req: Request, res: Response) {
   const { status, district, search, page = '1', limit = '20' } = req.query
@@ -92,6 +106,22 @@ export async function createCustomer(req: Request, res: Response) {
   // 否則例如手key「0912-345-678」跟來電比對到的「0912345678」會被當成兩支不同號碼
   const normalizedPhone = phone ? normalizePhone(phone) : phone
   const normalizedPhone2 = phone2 ? normalizePhone(phone2) : (phone2 ?? null)
+
+  // 新增前先查電話有沒有被別的客戶佔用——同一人開兩間店共用電話是合法情境，
+  // 所以這裡不是硬擋，而是要求前端跳確認、staff 明確按下「仍要新增」（confirmDuplicate）才放行，
+  // 避免的是像「來電 0983779091」那樣沒人注意到就悄悄建出一筆重複客戶
+  if (!req.body.confirmDuplicate) {
+    const owner = normalizedPhone ? await findPhoneOwner(normalizedPhone) : null
+    const owner2 = !owner && normalizedPhone2 ? await findPhoneOwner(normalizedPhone2) : null
+    const dup = owner || owner2
+    if (dup) {
+      return res.status(409).json({
+        error: `這支電話已經登記在「${dup.name}」名下，確定要新增新客戶嗎？`,
+        duplicate: dup,
+      })
+    }
+  }
+
   const [result] = await db.query(
     `INSERT INTO customers
       (name, phone, phone2, address, district, note, deposit, price_override, delivery_cycle, delivery_day,
@@ -119,6 +149,27 @@ export async function updateCustomer(req: Request, res: Response) {
   const updates: string[] = []
   const params: any[] = []
   const body: any = req.body
+
+  // 只有真的要「改成一個新號碼」才需要查重複；沒改、或改成的號碼本來就是自己已有的，
+  // 都不用查（不然自己編輯自己會一直被自己擋下來）
+  if (!body.confirmDuplicate && (body.phone || body.phone2)) {
+    const [existingRows] = await db.query('SELECT phone, phone2 FROM customers WHERE id = ?', [id]) as any
+    const existing = existingRows[0]
+    for (const f of ['phone', 'phone2'] as const) {
+      const raw = body[f]
+      if (typeof raw !== 'string' || !raw) continue
+      const normalized = normalizePhone(raw)
+      if (existing && (normalized === existing.phone || normalized === existing.phone2)) continue
+      const dup = await findPhoneOwner(normalized, id)
+      if (dup) {
+        return res.status(409).json({
+          error: `這支電話已經登記在「${dup.name}」名下，確定要儲存嗎？`,
+          duplicate: dup,
+        })
+      }
+    }
+  }
+
   for (const f of fields) {
     const key = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
     let value = body[key] !== undefined ? body[key] : (body[f] !== undefined ? body[f] : undefined)

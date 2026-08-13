@@ -220,15 +220,35 @@ export default function CustomerPage({ openEditId, onOpenEditConsumed, quickEdit
         data.default_unit_price = null
         data.fixedItems = []
       }
+      await saveCustomer(data)
+      closeForm()
+      if (!quickEditOnly) await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 抽成獨立函式：儲存時如果電話已經登記在別的客戶身上，後端會回 409 + duplicate 資訊，
+  // 這裡跳確認（同一人開兩間店共用電話是合法情境，不能直接擋死），
+  // staff 確認要繼續才帶 confirmDuplicate 重送一次
+  async function saveCustomer(data: any) {
+    try {
       if (editId) {
         await api.updateCustomer(editId, data)
       } else {
         await api.createCustomer(data)
       }
-      closeForm()
-      if (!quickEditOnly) await load()
-    } finally {
-      setSaving(false)
+    } catch (e: any) {
+      if (e.duplicate && confirm(`${e.message}\n（已登記客戶：${e.duplicate.name}）`)) {
+        const retryData = { ...data, confirmDuplicate: true }
+        if (editId) {
+          await api.updateCustomer(editId, retryData)
+        } else {
+          await api.createCustomer(retryData)
+        }
+        return
+      }
+      throw e
     }
   }
 
