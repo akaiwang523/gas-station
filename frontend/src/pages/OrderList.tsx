@@ -78,6 +78,11 @@ function isFutureScheduled(order: { scheduled_date: string | null }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
   return sched > today
 }
+// 同一張待送單，當天客戶又打來一次時，後端會把「（再次來電 HH:MM）」附加進 note——
+// 用這個判斷要不要在卡片上跳紅底提醒，讓司機/接單的人一眼看出這張單客戶已經催過
+function isRepeatCall(order: { note: string | null }) {
+  return !!order.note && order.note.includes('再次來電')
+}
 export default function OrderList({ refresh, onEditCustomer }: { refresh?: number; onEditCustomer?: (customerId: number) => void }) {
   const [orders, setOrders] = useState<Order[]>([])
   const [returnsMap, setReturnsMap] = useState<Record<number, any[]>>({})
@@ -796,6 +801,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       </span>
                     )}
                     <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
+                    {isRepeatCall(order) && (
+                      <span className="text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap bg-red-500 text-white">
+                        再次來電
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -863,6 +873,14 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     >
                       {rowStatus.label}
                     </span>
+                    {isRepeatCall(order) && (
+                      <span
+                        className="inline-block mb-1 ml-1 rounded-full font-medium whitespace-nowrap bg-red-500 text-white"
+                        style={{ fontSize: 11, padding: '2px 8px' }}
+                      >
+                        再次來電
+                      </span>
+                    )}
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
                       <SourceBadge source={order.source} />
