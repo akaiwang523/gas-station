@@ -585,6 +585,15 @@ export async function incomingCallById(req: Request, res: Response) {
       [normalizedPhone]
     ) as any
     callTime = unknownCallRows[0]?.first_called_at || null
+
+    // 這支號碼已經確認選了其中一間店，要把陌生來電紀錄標記已處理——
+    // 這裡原本漏了這一步（跟 bindCallerToCustomer 不同流程各寫各的），導致「一號多店」
+    // 選了店之後，同一筆 unknown_calls 還是 PENDING，下一次輪詢又跳出「這通電話是哪一間？」，
+    // 使用者怎麼點都關不掉，變成無限迴圈
+    await db.query(
+      `UPDATE unknown_calls SET status = 'HANDLED', handled_at = NOW() WHERE phone = ? AND status = 'PENDING'`,
+      [normalizedPhone]
+    )
   }
 
   const [rows] = await db.query(
