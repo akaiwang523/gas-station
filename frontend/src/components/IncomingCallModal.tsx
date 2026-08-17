@@ -153,6 +153,19 @@ export default function IncomingCallModal() {
           setSearchQuery('')
           setSearchResults([])
           setVisible(true)
+        } else {
+          // 電話號碼沒變，但同一筆陌生來電紀錄背後比對到的客戶清單可能有更新——
+          // 例如第一次來電時查無客戶，後來另一間店把同一支電話補登進客戶資料，
+          // 變成「一號多店」。這種情況畫面要跟著換成選店畫面，不能只靠使用者
+          // 手動重新整理頁面才看得到最新結果。只更新這一個欄位，避免打斷使用者
+          // 正在填的新客戶表單或搜尋內容。
+          setMatchedCustomers(prev => {
+            const next = nextUnknown.matchedCustomers || []
+            const changed =
+              next.length !== prev.length ||
+              next.some((c: { id: number }, idx: number) => c.id !== prev[idx]?.id)
+            return changed ? next : prev
+          })
         }
       } else {
         // 目前沒有任何「還沒被稍後」的待處理草稿/陌生來電，重設記錄，避免漏接下一筆新進來的同 ID 情況
