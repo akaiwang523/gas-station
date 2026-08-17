@@ -2,6 +2,23 @@ import { Request, Response } from 'express'
 import { db } from '../lib/db'
 import { normalizePhone, PHONE_MATCH_SQL, phoneMatchParams } from '../lib/phone'
 
+// unknown_calls.matched_customer_ids 是 MySQL 的 JSON 欄位型別，mysql2 驅動在 SELECT
+// 時會自動把它解析成 JS 陣列，不再是原始字串——這裡卻一直當成字串用 JSON.parse() 解，
+// 對一個已經是陣列的值呼叫 JSON.parse() 一定會丟例外（被 catch 吃掉、靜默當成沒比對到），
+// 導致資料庫明明存對了，「一號多店」的比對結果卻永遠讀不出來。這裡統一處理兩種可能情況。
+function parseMatchedIds(raw: unknown): number[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw as number[]
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 // 記一筆「再次來電」事件：前端用遞增 id 當游標輪詢，只要出現新事件就跳 toast，
 // 不管使用者當下在訂單頁、客戶頁還是報表頁都看得到，不會因為訂單本身沒變成新卡片而被忽略
 async function logRepeatCall(orderId: number, customerName: string, phone: string) {
@@ -338,10 +355,7 @@ export async function getDraft(_req: Request, res: Response) {
   // 一支電話對到多筆客戶（同一人開多間店）的情況，額外帶出這幾筆客戶的姓名/地址，
   // 前端可以直接列出來給人選，不用像真的陌生號碼那樣還要打字搜尋
   const allMatchedIds: number[] = Array.from(new Set(
-    unknownRows.flatMap((u: any) => {
-      if (!u.matched_customer_ids) return []
-      try { return JSON.parse(u.matched_customer_ids) } catch { return [] }
-    })
+    unknownRows.flatMap((u: any) => parseMatchedIds(u.matched_customer_ids))
   ))
   let matchedCustomersById: Record<number, { id: number; name: string; address: string }> = {}
   if (allMatchedIds.length > 0) {
@@ -354,14 +368,9 @@ export async function getDraft(_req: Request, res: Response) {
   }
 
   const unknownCalls = unknownRows.map((u: any) => {
-    let matchedCustomers: { id: number; name: string; address: string }[] = []
-    if (u.matched_customer_ids) {
-      try {
-        matchedCustomers = (JSON.parse(u.matched_customer_ids) as number[])
-          .map((id) => matchedCustomersById[id])
-          .filter(Boolean)
-      } catch { /* 壞資料就當沒有比對到 */ }
-    }
+    const matchedCustomers = parseMatchedIds(u.matched_customer_ids)
+      .map((id) => matchedCustomersById[id])
+      .filter(Boolean)
     return {
       id: u.id,
       phone: u.phone,
