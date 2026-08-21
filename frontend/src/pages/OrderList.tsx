@@ -95,9 +95,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [returnKg, setReturnKg] = useState('')
   const [returnAction, setReturnAction] = useState('RECORD')
   const [predictions, setPredictions] = useState<any[]>([])
+  const [lowConfPredictions, setLowConfPredictions] = useState<any[]>([])
   const [notifiedIds, setNotifiedIds] = useState<Set<number>>(new Set())
   const [notifyingId, setNotifyingId] = useState<number | null>(null)
   const [predExpanded, setPredExpanded] = useState(false)
+  const [lowConfExpanded, setLowConfExpanded] = useState(false)
   const [lineInquiries, setLineInquiries] = useState<any[]>([])
   const [inquiriesExpanded, setInquiriesExpanded] = useState(false)
   const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>({})
@@ -165,6 +167,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
       try {
         const pred = await api.getPredictions()
         setPredictions(pred.predictions || [])
+        setLowConfPredictions(pred.lowConfidence || [])
       } catch {}
       try {
         const inq = await api.getLineInquiries('PENDING')
@@ -455,6 +458,59 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   ? orders
   : orders.filter(o => ['PENDING','ASSIGNED','DELIVERING'].includes(o.status))
   const done = orders.filter(o => ['DELIVERED','CANCELLED'].includes(o.status))
+  // 預測卡片的樣式兩個區塊共用（主清單 + 資料不足區塊），差別只在「取消提醒」要從哪一個清單移除
+  function renderPredictionCard(p: any, isLowConf: boolean) {
+    return (
+        <div key={p.customerId} className="flex-shrink-0 w-56 bg-white rounded-xl p-3 border border-blue-200 shadow-sm relative">
+          <button
+            onClick={async () => {
+              (isLowConf ? setLowConfPredictions : setPredictions)(prev => prev.filter((x: any) => x.customerId !== p.customerId))
+              try { await api.dismissPrediction(p.customerId) } catch { /* 失敗就算了，下次重新整理還是會抓到最新狀態 */ }
+            }}
+            className="absolute top-1.5 right-1.5 text-gray-300 hover:text-gray-500 text-sm w-5 h-5 flex items-center justify-center"
+            title="取消這一輪提醒（下次他有新訂單才會重新提醒）"
+          >✕</button>
+          <div className="pr-4">
+            <div className="font-bold text-gray-800 text-sm break-words">{p.customerName}</div>
+            {p.confidence === 'default' && (
+              <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded inline-block mt-0.5" title="資料還不夠多，用客戶類型的預設值估算，僅供參考">僅供參考</span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
+          {p.overdueDays > 0 && (
+            <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
+          )}
+          <div className="text-xs text-gray-500">上次叫 {p.lastQuantity} 桶，預估可撐 {p.estimatedDaysPerBatch} 天</div>
+          <div className="text-xs text-gray-400">單桶約撐 {p.daysPerBottle} 天{p.confidence === 'default' ? '（依客戶類型估算）' : ''}</div>
+          <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
+          {p.lineBound ? (
+            <button
+              onClick={async () => {
+                if (!window.confirm(`確定要發送 LINE 補貨提醒給「${p.customerName}」嗎？`)) return
+                setNotifyingId(p.customerId)
+                try {
+                  await api.notifyPrediction(p.customerId)
+                  setNotifiedIds(prev => new Set(prev).add(p.customerId))
+                } catch (e: any) {
+                  alert(e.message || 'LINE 通知失敗')
+                } finally {
+                  setNotifyingId(null)
+                }
+              }}
+              disabled={notifyingId === p.customerId || notifiedIds.has(p.customerId)}
+              className="mt-2 w-full py-1.5 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white text-xs font-bold rounded-lg flex items-center justify-center"
+            >
+              {notifiedIds.has(p.customerId) ? '✅ 已通知' : notifyingId === p.customerId ? '發送中...' : '📱 LINE 通知'}
+            </button>
+          ) : (
+            <a
+              href={`tel:${p.customerPhone}`}
+              className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
+            >📞 撥打電話</a>
+          )}
+        </div>
+    )
+  }
   return (
     <div className="max-w-lg lg:max-w-3xl mx-auto p-4 space-y-4">
       <h2 className="text-xl font-bold text-gray-800">📦 今日訂單 <span className="text-sm font-normal text-gray-400">{new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}</span></h2>
@@ -635,57 +691,32 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           </button>
           {predExpanded && (
             <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
-              {predictions.map(p => (
-                <div key={p.customerId} className="flex-shrink-0 w-56 bg-white rounded-xl p-3 border border-blue-200 shadow-sm relative">
-                  <button
-                    onClick={async () => {
-                      setPredictions(prev => prev.filter(x => x.customerId !== p.customerId))
-                      try { await api.dismissPrediction(p.customerId) } catch { /* 失敗就算了，下次重新整理還是會抓到最新狀態 */ }
-                    }}
-                    className="absolute top-1.5 right-1.5 text-gray-300 hover:text-gray-500 text-sm w-5 h-5 flex items-center justify-center"
-                    title="取消這一輪提醒（下次他有新訂單才會重新提醒）"
-                  >✕</button>
-                  <div className="pr-4">
-                    <div className="font-bold text-gray-800 text-sm break-words">{p.customerName}</div>
-                    {p.confidence === 'default' && (
-                      <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded inline-block mt-0.5" title="資料還不夠多，用客戶類型的預設值估算，僅供參考">僅供參考</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">預測耗盡：{p.predictedDate}</div>
-                  {p.overdueDays > 0 && (
-                    <div className="text-xs text-red-500 font-bold">⚠️ 已過期 {p.overdueDays} 天</div>
-                  )}
-                  <div className="text-xs text-gray-500">上次叫 {p.lastQuantity} 桶，預估可撐 {p.estimatedDaysPerBatch} 天</div>
-                  <div className="text-xs text-gray-400">單桶約撐 {p.daysPerBottle} 天{p.confidence === 'default' ? '（依客戶類型估算）' : ''}</div>
-                  <div className="text-xs text-gray-500">上次：{p.lastGasType?.replace('BOTTLED_','').replace('KG','kg')} × {p.lastQuantity}</div>
-                  {p.lineBound ? (
-                    <button
-                      onClick={async () => {
-                        if (!window.confirm(`確定要發送 LINE 補貨提醒給「${p.customerName}」嗎？`)) return
-                        setNotifyingId(p.customerId)
-                        try {
-                          await api.notifyPrediction(p.customerId)
-                          setNotifiedIds(prev => new Set(prev).add(p.customerId))
-                        } catch (e: any) {
-                          alert(e.message || 'LINE 通知失敗')
-                        } finally {
-                          setNotifyingId(null)
-                        }
-                      }}
-                      disabled={notifyingId === p.customerId || notifiedIds.has(p.customerId)}
-                      className="mt-2 w-full py-1.5 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white text-xs font-bold rounded-lg flex items-center justify-center"
-                    >
-                      {notifiedIds.has(p.customerId) ? '✅ 已通知' : notifyingId === p.customerId ? '發送中...' : '📱 LINE 通知'}
-                    </button>
-                  ) : (
-                    <a
-                      href={`tel:${p.customerPhone}`}
-                      className="mt-2 w-full py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center justify-center"
-                    >📞 撥打電話</a>
-                  )}
-                </div>
-              ))}
+              {predictions.map(p => renderPredictionCard(p, false))}
             </div>
+          )}
+        </div>
+      )}
+      {lowConfPredictions.length > 0 && (
+        <div className="bg-gray-50 rounded-xl p-3">
+          <button
+            className="w-full flex items-center justify-between"
+            onClick={() => setLowConfExpanded(prev => !prev)}
+          >
+            <div className="text-sm font-bold text-gray-500">
+              🤔 資料不足，僅供參考
+              <span className="ml-2 bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">{lowConfPredictions.length}</span>
+            </div>
+            <span className="text-gray-400 text-xs">{lowConfExpanded ? '▲ 收合' : '▼ 展開'}</span>
+          </button>
+          {lowConfExpanded && (
+            <>
+              <div className="text-xs text-gray-400 mt-1">
+                這些客戶只叫過 1-2 次，沒有足夠紀錄推算週期，是用客戶類型的預設值猜的，準確度低。等他們累積到第 3 次叫貨就會自動移到上面的主清單。
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
+                {lowConfPredictions.map(p => renderPredictionCard(p, true))}
+              </div>
+            </>
           )}
         </div>
       )}

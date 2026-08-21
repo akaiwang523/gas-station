@@ -42,7 +42,12 @@ export async function getPredictions(req: Request, res: Response) {
     const [lineBindings] = await db.query(`SELECT DISTINCT customer_id FROM line_users`) as any
     const lineBoundIds = new Set((lineBindings as any[]).map(r => r.customer_id))
 
-    const predictions = []
+    // 主清單只放有歷史資料算出來的預測（confidence = 'normal'）。
+    // 只叫過 1-2 次的客戶沒有足夠資料推算週期，只能套客戶類型的預設值，
+    // 實測命中率極低（約 6%，相對 normal 層的 69%），混在一起只會把真正該打的電話稀釋掉，
+    // 所以分成另一組回傳，前端獨立收合顯示；他們累積到第 3 個叫貨日就會自動升級進主清單
+    const predictions: any[] = []
+    const lowConfidence: any[] = []
 
     for (const customer of customers) {
       // 取最近 4 個「有下單的日子」，每個日子的桶數用 SUM 加總——
@@ -193,7 +198,8 @@ export async function getPredictions(req: Request, res: Response) {
         } catch (trackErr) {
           console.error('[getPredictions] prediction_history insert failed', trackErr)
         }
-        predictions.push({
+        const target = confidence === 'normal' ? predictions : lowConfidence
+        target.push({
           customerId: customer.id,
           customerName: customer.name,
           customerPhone: customer.phone,
@@ -214,8 +220,9 @@ export async function getPredictions(req: Request, res: Response) {
 
     // 拖越久沒問的排越前面，最需要優先聯絡的客戶先看到
     predictions.sort((a, b) => b.overdueDays - a.overdueDays)
+    lowConfidence.sort((a, b) => b.overdueDays - a.overdueDays)
 
-    res.json({ predictions })
+    res.json({ predictions, lowConfidence })
   } catch (err) {
     console.error('[getPredictions]', err)
     res.status(500).json({ error: '預測失敗' })
