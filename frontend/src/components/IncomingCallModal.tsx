@@ -441,8 +441,8 @@ export default function IncomingCallModal() {
 
   if (unknownPhone) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-y-auto max-h-[90vh]">
           <div className="bg-gray-700 text-white px-5 py-4 flex items-center gap-3">
             <span className="text-3xl">📞</span>
             <div>
@@ -593,9 +593,9 @@ export default function IncomingCallModal() {
   if (!draft) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className="bg-orange-500 text-white px-5 py-4 flex items-center gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="bg-orange-500 text-white px-5 py-4 flex items-center gap-3 shrink-0">
           <span className="text-3xl animate-bounce">📞</span>
           <div>
             <div className="font-bold text-lg">來電自動草稿</div>
@@ -603,7 +603,7 @@ export default function IncomingCallModal() {
           </div>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 space-y-4 flex-1 overflow-y-auto min-h-0">
           <div className="bg-gray-50 rounded-xl p-3 space-y-1">
             <div className="font-bold text-gray-800 text-lg">{draft.customer.name}</div>
             <div className="text-gray-500 text-sm">{draft.customer.address}</div>
@@ -733,7 +733,7 @@ export default function IncomingCallModal() {
           </div>
         </div>
 
-        <div className="px-5 pb-5 flex gap-2">
+        <div className="px-5 py-4 flex gap-2 shrink-0 border-t border-gray-100 bg-white">
           <button onClick={handleCancel} disabled={loading} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
             取消派單
           </button>
