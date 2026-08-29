@@ -1053,23 +1053,23 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                             value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} onClick={e => e.stopPropagation()} />
                         </div>
                         <div className="flex-1">
-                          <label className="flex items-center gap-1 flex-wrap text-xs text-gray-400 mb-0.5">
-                            單價
+                          <div className="flex items-center gap-2 flex-wrap text-xs text-gray-400 mb-0.5">
+                            <span>單價</span>
                             <button
                               type="button"
                               onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice)) }}
-                              className="text-blue-500 hover:text-blue-700 font-normal"
+                              className="text-blue-500 hover:text-blue-700 font-normal px-1.5 py-1 -my-1 rounded"
                               title="套用目前基準價"
                             >套用基準價</button>
                             {getLastUnitPrice(order, item.gasType) !== null && (
                               <button
                                 type="button"
                                 onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType))) }}
-                                className="text-green-600 hover:text-green-800 font-normal"
+                                className="text-green-600 hover:text-green-800 font-normal px-1.5 py-1 -my-1 rounded"
                                 title="套用這位客戶上次同規格的單價"
                               >套用上次價 ${getLastUnitPrice(order, item.gasType)}</button>
                             )}
-                          </label>
+                          </div>
                           <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                             value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} onClick={e => e.stopPropagation()} />
                         </div>
@@ -1245,23 +1245,23 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                             value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
                         </div>
                         <div className="flex-1">
-                          <label className="flex items-center gap-1 flex-wrap text-xs text-gray-400 mb-0.5">
-                            單價
+                          <div className="flex items-center gap-2 flex-wrap text-xs text-gray-400 mb-0.5">
+                            <span>單價</span>
                             <button
                               type="button"
-                              onClick={() => updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice))}
-                              className="text-blue-500 hover:text-blue-700 font-normal"
+                              onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice)) }}
+                              className="text-blue-500 hover:text-blue-700 font-normal px-1.5 py-1 -my-1 rounded"
                               title="套用目前基準價"
                             >套用基準價</button>
                             {getLastUnitPrice(order, item.gasType) !== null && (
                               <button
                                 type="button"
-                                onClick={() => updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType)))}
-                                className="text-green-600 hover:text-green-800 font-normal"
+                                onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType))) }}
+                                className="text-green-600 hover:text-green-800 font-normal px-1.5 py-1 -my-1 rounded"
                                 title="套用這位客戶上次同規格的單價"
                               >套用上次價 ${getLastUnitPrice(order, item.gasType)}</button>
                             )}
-                          </label>
+                          </div>
                           <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                             value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
                         </div>
