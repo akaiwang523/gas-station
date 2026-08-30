@@ -17,6 +17,17 @@ const ABSOLUTE_MIN_DAYS_PER_BOTTLE = 1 // 下限本身也有下限，避免動�
 const BASE_MIN_DAYS_PER_BOTTLE = 3 // 平均每次只訂 1 桶時的下限（維持原本設計）
 const MAX_DAYS_PER_BOTTLE = 60
 
+// 訂單的「實際配送日」：預約單在建單當下就寫入 created_at，但客戶其實是過幾天才拿到瓦斯，
+// 用 created_at 算等於時鐘提早開始跑，會高估用量、預測日期偏早。
+// 優先序：真的送達了用 delivered_at → 排定日 scheduled_date → 最後才回退 created_at
+const EFFECTIVE_DATE_SQL = 'COALESCE(o.delivered_at, o.scheduled_date, o.created_at)'
+
+// 未確認的來電草稿（DRAFT）不算真的叫過貨——客戶只是打了電話，還沒確認派單，
+// 把它當成一次配送會把預測時鐘往後推，該提醒的客戶反而被藏起來。
+// （前端 customerHistory 本來就有排除 DRAFT，這裡以前漏掉了）
+const REAL_ORDER_STATUS = `status NOT IN ('CANCELLED', 'DRAFT')`
+const REAL_ORDER_STATUS_O = `o.status NOT IN ('CANCELLED', 'DRAFT')`
+
 export async function getPredictions(req: Request, res: Response) {
   try {
     // 撈出「至少有 1 筆訂單」的活躍客戶——降低門檻是因為現在改成資料不夠時會用
@@ -24,7 +35,7 @@ export async function getPredictions(req: Request, res: Response) {
     // 只要有 1 筆訂單當「上次配送」的基準點就能推算
     const [customers] = await db.query(
       `SELECT c.id, c.name, c.phone, c.customer_type,
-              (SELECT COUNT(*) FROM orders WHERE customer_id = c.id AND status != 'CANCELLED') as order_count
+              (SELECT COUNT(*) FROM orders WHERE customer_id = c.id AND ${REAL_ORDER_STATUS}) as order_count
        FROM customers c
        WHERE c.status = 'ACTIVE'
        HAVING order_count >= 1`
@@ -50,16 +61,19 @@ export async function getPredictions(req: Request, res: Response) {
     const lowConfidence: any[] = []
 
     for (const customer of customers) {
-      // 取最近 4 個「有下單的日子」，每個日子的桶數用 SUM 加總——
+      // 取最近 4 個「有配送的日子」，每個日子的桶數用 SUM 加總——
       // 同一天不管建了幾張單（不管是分次記錄、還是不小心重複建單），都要當成同一次配送需求，
       // 不能各自成一筆去算間隔，不然兩筆訂單只隔幾小時，天數幾乎是 0，桶數除下去會爆出離譜的用量速度
+      // 日期一律用 EFFECTIVE_DATE_SQL（送達日優先），不是建單日
       const [orders] = await db.query(
-        `SELECT MIN(o.id) as id, DATE(o.created_at) as order_date, MAX(o.created_at) as created_at,
+        `SELECT MIN(o.id) as id,
+                DATE(${EFFECTIVE_DATE_SQL}) as order_date,
+                MAX(${EFFECTIVE_DATE_SQL}) as effective_at,
                 COALESCE(SUM(oi.quantity), SUM(o.quantity)) as total_quantity
          FROM orders o
          LEFT JOIN order_items oi ON oi.order_id = o.id
-         WHERE o.customer_id = ? AND o.status != 'CANCELLED'
-         GROUP BY DATE(o.created_at)
+         WHERE o.customer_id = ? AND ${REAL_ORDER_STATUS_O}
+         GROUP BY DATE(${EFFECTIVE_DATE_SQL})
          ORDER BY order_date DESC
          LIMIT 4`,
         [customer.id]
@@ -68,7 +82,7 @@ export async function getPredictions(req: Request, res: Response) {
       if (orders.length === 0) continue
 
       // 這一輪提醒被取消過，而且之後沒有新訂單進來，就先不顯示
-      const lastOrderTime = new Date(orders[0].created_at).getTime()
+      const lastOrderTime = new Date(orders[0].effective_at).getTime()
       if (dismissedAt[customer.id] && dismissedAt[customer.id] >= lastOrderTime) continue
 
       // 預測準確度追蹤：把「上一輪還沒兌現的預測」拿去對這位客戶最新的訂單——
@@ -82,15 +96,15 @@ export async function getPredictions(req: Request, res: Response) {
         ) as any
         for (const row of unresolved as any[]) {
           const [fulfilling] = await db.query(
-            `SELECT id, created_at FROM orders
-             WHERE customer_id = ? AND status != 'CANCELLED' AND created_at > ?
-             ORDER BY created_at ASC LIMIT 1`,
+            `SELECT o.id, ${EFFECTIVE_DATE_SQL} as effective_at FROM orders o
+             WHERE o.customer_id = ? AND ${REAL_ORDER_STATUS_O} AND ${EFFECTIVE_DATE_SQL} > ?
+             ORDER BY ${EFFECTIVE_DATE_SQL} ASC LIMIT 1`,
             [customer.id, row.predicted_at]
           ) as any
           if (fulfilling[0]) {
             await db.query(
               `UPDATE prediction_history SET actual_order_id = ?, actual_order_date = DATE(?) WHERE id = ?`,
-              [fulfilling[0].id, fulfilling[0].created_at, row.id]
+              [fulfilling[0].id, fulfilling[0].effective_at, row.id]
             )
           }
         }
@@ -116,7 +130,7 @@ export async function getPredictions(req: Request, res: Response) {
         const chronological = [...orders].reverse() as any[] // 轉成舊到新，方便算區間
         const dailyRates: number[] = []
         for (let i = 0; i < chronological.length - 1; i++) {
-          const days = (new Date(chronological[i + 1].created_at).getTime() - new Date(chronological[i].created_at).getTime()) / (1000 * 60 * 60 * 24)
+          const days = (new Date(chronological[i + 1].effective_at).getTime() - new Date(chronological[i].effective_at).getTime()) / (1000 * 60 * 60 * 24)
           const qty = Number(chronological[i].total_quantity) || 1
           if (days > 0) dailyRates.push(qty / days)
         }
@@ -152,7 +166,7 @@ export async function getPredictions(req: Request, res: Response) {
       const lastQuantity = Number(lastOrder.total_quantity) || 1
       const daysThisBatchLasts = daysPerBottle * lastQuantity
 
-      const lastOrderDate = new Date(lastOrder.created_at)
+      const lastOrderDate = new Date(lastOrder.effective_at)
       const predictedDate = new Date(lastOrderDate.getTime() + daysThisBatchLasts * 24 * 60 * 60 * 1000)
 
       // 上限：明天以內才提前顯示（不用太早打擾客戶）；沒有下限——
@@ -165,6 +179,8 @@ export async function getPredictions(req: Request, res: Response) {
       predictedDay.setHours(0, 0, 0, 0)
 
       // 排除今天已有訂單的客戶（用台北時區的日期字串，避免跟 container 的 UTC 時間對不起來）
+      // 注意：這裡刻意「不」排除 DRAFT——客戶今天已經打電話來了（即使還沒確認派單），
+      // 提醒就該消失，不然會重複騷擾同一位客戶
       const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
       const [todayOrders] = await db.query(
         `SELECT id FROM orders WHERE customer_id = ? AND DATE(created_at) = ? AND status != 'CANCELLED'`,
