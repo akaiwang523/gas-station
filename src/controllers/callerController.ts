@@ -6,6 +6,29 @@ import { normalizePhone, PHONE_MATCH_SQL, phoneMatchParams } from '../lib/phone'
 // 時會自動把它解析成 JS 陣列，不再是原始字串——這裡卻一直當成字串用 JSON.parse() 解，
 // 對一個已經是陣列的值呼叫 JSON.parse() 一定會丟例外（被 catch 吃掉、靜默當成沒比對到），
 // 導致資料庫明明存對了，「一號多店」的比對結果卻永遠讀不出來。這裡統一處理兩種可能情況。
+// 「歸檔（INACTIVE）」跟「被合併（也是 INACTIVE）」要分開看：
+// - 被合併的那筆：電話已經搬到保留客戶身上，來電比對一定要排除，不然會跟保留客戶撞成「一號多店」
+// - 單純歸檔的：只是很久沒叫，人還是同一個人。以前來電比對直接排除所有 INACTIVE，
+//   結果歸檔客戶一打來就被當成陌生號碼，又生出一筆「來電 09xx」重複客戶
+// 規則：優先比對 ACTIVE；完全沒有 ACTIVE 符合時，才退回找「歸檔但非合併」的客戶，
+// 並且在真的建單時自動恢復成 ACTIVE（有打來叫瓦斯＝還是客人）
+const NOT_MERGED_SQL = `COALESCE(c.note, '') NOT LIKE '%合併至客戶 #%'`
+
+function pickCandidates<T extends { status: string }>(rows: T[]): T[] {
+  const active = rows.filter((r) => r.status !== 'INACTIVE')
+  return active.length > 0 ? active : rows
+}
+
+async function reactivateIfArchived(c: { id: number; status: string }) {
+  if (c.status !== 'INACTIVE') return
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' })
+  await db.query(
+    `UPDATE customers SET status = 'ACTIVE', note = CONCAT(COALESCE(note, ''), ?) WHERE id = ? AND status = 'INACTIVE'`,
+    [`\n[${today} 來電自動恢復為啟用]`, c.id]
+  )
+  c.status = 'ACTIVE'
+}
+
 function parseMatchedIds(raw: unknown): number[] {
   if (!raw) return []
   if (Array.isArray(raw)) return raw as number[]
@@ -69,7 +92,8 @@ export async function lookupCaller(req: Request, res: Response) {
     `SELECT c.*, a.amount_owed, a.cylinders_owed 
      FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE ${PHONE_MATCH_SQL} AND c.status != 'INACTIVE' LIMIT 1`,
+     WHERE ${PHONE_MATCH_SQL} AND ${NOT_MERGED_SQL}
+     ORDER BY (c.status = 'INACTIVE') ASC, c.id ASC LIMIT 1`,
     phoneMatchParams(normalized)
   ) as any
 
@@ -126,13 +150,14 @@ export async function incomingCall(req: Request, res: Response) {
 
   // 拿掉 LIMIT 1：一支電話（同一個客戶）可能對應到不只一筆客戶資料（例如同一人開兩間店，
   // 兩筆客戶都填同一支電話）。這裡先撈出全部符合的客戶，再依筆數分流處理
-  const [rows] = await db.query(
+  const [allRows] = await db.query(
     `SELECT c.*, a.amount_owed, a.cylinders_owed 
      FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE ${PHONE_MATCH_SQL} AND c.status != 'INACTIVE' ORDER BY c.id ASC`,
+     WHERE ${PHONE_MATCH_SQL} AND ${NOT_MERGED_SQL} ORDER BY c.id ASC`,
     phoneMatchParams(normalized)
   ) as any
+  const rows: any[] = pickCandidates(allRows)
 
   if (rows.length === 0) {
     // 陌生號碼，寫進資料庫（同號碼重複來電只累加次數，不重複建列）
@@ -187,6 +212,7 @@ export async function incomingCall(req: Request, res: Response) {
   )
 
   const c = rows[0]
+  await reactivateIfArchived(c)
 
   // 同一客戶若「今天」還有一筆尚未送達的單（草稿、待送、已指派、配送中都算），
   // 再次來電就沿用既有那筆、標記再次來電時間，不重複建單——
@@ -495,11 +521,12 @@ export async function bindCallerToCustomer(req: Request, res: Response) {
   const [rows] = await db.query(
     `SELECT c.*, a.amount_owed FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE c.id = ? AND c.status != 'INACTIVE' LIMIT 1`,
+     WHERE c.id = ? AND ${NOT_MERGED_SQL} LIMIT 1`,
     [customerId]
   ) as any
   if (!rows[0]) return res.status(404).json({ error: '客戶不存在' })
   const c = rows[0]
+  await reactivateIfArchived(c)
 
   // 確認這支號碼沒有被別的客戶佔用
   const [dup] = await db.query(
@@ -599,13 +626,14 @@ export async function incomingCallById(req: Request, res: Response) {
   const [rows] = await db.query(
     `SELECT c.*, a.amount_owed FROM customers c 
      LEFT JOIN ar_balances a ON a.customer_id = c.id
-     WHERE c.id = ? AND c.status != 'INACTIVE' LIMIT 1`,
+     WHERE c.id = ? AND ${NOT_MERGED_SQL} LIMIT 1`,
     [customerId]
   ) as any
 
   if (!rows[0]) return res.status(404).json({ error: '客戶不存在' })
 
   const c = rows[0]
+  await reactivateIfArchived(c)
 
   // 同一客戶「今天」若還有一筆尚未送達的單，直接沿用，不重複建立（跟主流程一致）
   // 同樣要用 CONVERT_TZ 轉台北時區比較，理由同上（避免凌晨時段誤判）
