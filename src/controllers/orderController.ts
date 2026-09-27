@@ -23,7 +23,8 @@ export async function getOrderCounts(_req: Request, res: Response) {
 // 這樣不用整個訂單列表輪詢（資料量大、頻繁打會浪費），卻能在 LINE 官方帳號有新訂單/新對話時自動更新畫面
 export async function getLineActivity(_req: Request, res: Response) {
   const [[orderRow]] = await db.query(
-    `SELECT COALESCE(MAX(id), 0) as latestOrderId FROM orders WHERE source = 'LINE'`
+    // 來電也會自動建單（不經過瀏覽器操作），一起納入，訂單頁才會即時出現
+    `SELECT COALESCE(MAX(id), 0) as latestOrderId FROM orders WHERE source IN ('LINE', 'CALLER')`
   ) as any
   const [[inquiryRow]] = await db.query(
     `SELECT COALESCE(MAX(id), 0) as latestInquiryId FROM line_inquiries`

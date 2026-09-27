@@ -22,17 +22,6 @@ type Order = {
 // 訂單來源小標籤：目前只標 LINE（使用者最在意的區分），
 // CALLER/SCHEDULED/MANUAL 已有別的方式看得出來（來電草稿區塊、已排定標籤等），先不加字重複
 function SourceBadge({ source }: { source: string | null | undefined }) {
-  // 2026-09-27 起來電直接進單、不再跳窗確認，所以來電單也要標出來，
-  // 一眼跟人工輸入的單分開（晚上在「對帳」頁用紙本出貨單核對）
-  if (source === 'CALLER') {
-    return (
-      <span
-        className="text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap flex-shrink-0"
-        style={{ background: '#DBEAFE', color: '#1D4ED8' }}
-        title="來電自動建單，內容照上一單帶入，請以出貨單為準"
-      >📞 來電</span>
-    )
-  }
   if (source !== 'LINE') return null
   return (
     <span
@@ -199,6 +188,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   // （webhook 直接寫資料庫），所以原本要手動重新整理才看得到。這裡改成每 5 秒問一次
   // 「目前最新的 LINE 訂單/詢問 id」這種輕量資訊，發現變大了才真的重新整理整個列表
   const lineActivityRef = useRef<{ orderId: number; inquiryId: number } | null>(null)
+  // 計時器只在第一次建立，裡面如果直接呼叫 load 會一直拿到「第一次畫面」時的舊 load（舊篩選條件），
+  // 所以透過 ref 永遠呼叫最新的 load
+  const loadRef = useRef(load)
+  loadRef.current = load
   useEffect(() => {
     let cancelled = false
     async function checkLineActivity() {
@@ -206,7 +199,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         const res = await api.getLineActivity()
         const prev = lineActivityRef.current
         if (prev && (res.latestOrderId > prev.orderId || res.latestInquiryId > prev.inquiryId)) {
-          if (!cancelled) load()
+          if (!cancelled) loadRef.current()
         }
         lineActivityRef.current = { orderId: res.latestOrderId, inquiryId: res.latestInquiryId }
       } catch { /* 這只是背景檢查，失敗就下次再試，不用打擾使用者 */ }
