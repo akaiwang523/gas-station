@@ -507,6 +507,27 @@ export async function dismissUnknownCall(req: Request, res: Response) {
   return res.json({ ok: true })
 }
 
+// POST /api/caller/unknown/not-order
+// body: { ids: number[] }
+// 陌生來電判定「不是叫瓦斯」（問事情、打錯、推銷…）：不建客戶、不建單，
+// 但跟「略過」不同，會明確記成 NOT_ORDER，之後可以統計、也能跟真的訂單分開。
+// 支援一次多筆，給事後批次清佇列用
+export async function markUnknownNotOrder(req: Request, res: Response) {
+  const ids: number[] = Array.isArray(req.body?.ids)
+    ? req.body.ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0)
+    : []
+  if (ids.length === 0) return res.status(400).json({ error: 'ids required' })
+
+  const placeholders = ids.map(() => '?').join(',')
+  const [result] = await db.query(
+    `UPDATE unknown_calls SET status = 'NOT_ORDER', handled_at = NOW()
+     WHERE id IN (${placeholders}) AND status = 'PENDING'`,
+    ids
+  ) as any
+
+  return res.json({ ok: true, updated: result.affectedRows ?? 0 })
+}
+
 // POST /api/caller/bind
 // body: { customerId, phone }
 // 把陌生來電號碼綁定到「既有客戶」（例如 Ragic 匯入、尚未登記電話的舊客戶），

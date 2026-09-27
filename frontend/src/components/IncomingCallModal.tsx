@@ -33,6 +33,22 @@ interface Draft {
   createdAt: string
 }
 
+interface UnknownCall {
+  id: number
+  phone: string
+  firstCalledAt: string
+  lastCalledAt: string
+  callCount: number
+  matchedCustomers: { id: number; name: string; address: string }[]
+}
+
+function fmtCallTime(iso: string) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+}
+
 const GAS_LABELS: Record<string, string> = {
   BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_10KG: '10kg', BOTTLED_4KG: '4kg',
 }
@@ -62,6 +78,11 @@ export default function IncomingCallModal() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: number; name: string; address: string }[]>([])
   const [searching, setSearching] = useState(false)
+  // 批次處理：陌生來電常常是事後才一次處理一堆，這時候一筆一筆跳窗太慢，
+  // 改成清單＋每列一鍵「不是／建單」，也可以勾選多筆一次標記「不是」
+  const [unknownList, setUnknownList] = useState<UnknownCall[]>([])
+  const [listMode, setListMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   const shownDraftId = useRef<number | null>(null)
   const shownUnknownPhone = useRef<string | null>(null)
@@ -73,6 +94,8 @@ export default function IncomingCallModal() {
   // 再次來電 toast 通知的輪詢游標：null 代表還沒初始化，第一次拿到的是「目前最新 id」，
   // 用它當起點，不會把過去累積的舊事件在剛打開頁面時一次全部跳出來
   const repeatCallCursor = useRef<number | null>(null)
+  // 從清單點「建單」指定要處理的那一筆：輪詢時優先顯示它，不然會被佇列裡更早的那筆蓋掉
+  const pinnedUnknownId = useRef<number | null>(null)
 
   useEffect(() => {
     api.getBaselinePrices()
@@ -104,6 +127,19 @@ export default function IncomingCallModal() {
       > = data.queue || []
 
       // 清掉已經不在佇列裡的稍後記錄（該筆已經被確認/取消掉了），避免這個 Set 無限長大
+      const unknowns: UnknownCall[] = queue
+        .filter((item): item is { kind: 'unknown'; unknownCall: any } => item.kind === 'unknown')
+        .map(item => item.unknownCall)
+      setUnknownList(unknowns)
+      setSelectedIds(prev => {
+        const alive = new Set(unknowns.map(u => u.id))
+        const next = new Set([...prev].filter(id => alive.has(id)))
+        return next.size === prev.size ? prev : next
+      })
+      if (pinnedUnknownId.current != null && !unknowns.some(u => u.id === pinnedUnknownId.current)) {
+        pinnedUnknownId.current = null
+      }
+
       const currentKeys = new Set(
         queue.map(item => item.kind === 'draft' ? `draft-${item.draft.id}` : `unknown-${item.unknownCall.id}`)
       )
@@ -112,7 +148,10 @@ export default function IncomingCallModal() {
       }
 
       // 從合併佇列裡挑「還沒被按過稍後」、時間最早的一筆——不分草稿或陌生來電
-      const nextItem = queue.find(item => {
+      const pinned = pinnedUnknownId.current != null
+        ? queue.find(item => item.kind === 'unknown' && item.unknownCall.id === pinnedUnknownId.current)
+        : undefined
+      const nextItem = pinned || queue.find(item => {
         const key = item.kind === 'draft' ? `draft-${item.draft.id}` : `unknown-${item.unknownCall.id}`
         return !deferredIds.current.has(key)
       }) || null
@@ -123,6 +162,7 @@ export default function IncomingCallModal() {
           shownDraftId.current = nextDraft.id
           shownUnknownPhone.current = null
           shownUnknownId.current = null
+          setListMode(false)
           setDraft(nextDraft)
           setUnknownPhone(null)
           setPaymentType(nextDraft.paymentType === 'AR' ? 'AR' : 'CASH')
@@ -318,6 +358,7 @@ export default function IncomingCallModal() {
   }, [searchQuery, searchMode, token])
 
   async function handleBind(customerId: number) {
+    pinnedUnknownId.current = null
     if (!unknownPhone) return
     setLoading(true)
     try {
@@ -340,6 +381,7 @@ export default function IncomingCallModal() {
   // 一號多店：選了其中一間店，直接用 incoming-by-id 建草稿單（不能用 /bind，
   // 因為這支電話本來就已經同時登記在好幾筆客戶身上，/bind 的重複號碼檢查會擋下來）
   async function handleQuickPick(customerId: number) {
+    pinnedUnknownId.current = null
     if (!unknownPhone) return
     setLoading(true)
     try {
@@ -360,6 +402,7 @@ export default function IncomingCallModal() {
   }
 
   async function handleCreateAndOrder() {
+    pinnedUnknownId.current = null
     if (!unknownPhone) return
     setLoading(true)
     try {
@@ -400,6 +443,7 @@ export default function IncomingCallModal() {
   // 適合「不確定是不是要叫瓦斯、要問過老闆再說」的狀況，不會像「新增並建單」那樣
   // 先把電話存進客戶名單，事後才發現不是真客戶還要跑去客戶管理刪除
   function handleDeferUnknown() {
+    pinnedUnknownId.current = null
     if (shownUnknownId.current == null) return
     deferredIds.current.add(`unknown-${shownUnknownId.current}`)
     setVisible(false)
@@ -410,34 +454,146 @@ export default function IncomingCallModal() {
     poll()
   }
 
-  async function handleDismiss() {
-    if (unknownPhone) {
-      // 找到對應的 unknown_calls id 並標記已處理，避免下次輪詢又跳出來
-      try {
-        const res = await fetch('/api/caller/draft', {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        const data = await res.json()
-        const match = data.unknownCalls?.find((u: any) => u.phone === unknownPhone)
-        if (match) {
-          await fetch(`/api/caller/unknown/${match.id}/dismiss`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` }
-          })
-        }
-      } catch {
-        // 靜默失敗，畫面還是會關閉，之後輪詢頂多再跳一次
-      }
+  async function markNotOrder(ids: number[]) {
+    if (ids.length === 0) return
+    setLoading(true)
+    try {
+      const res = await fetch('/api/caller/unknown/not-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids }),
+      })
+      if (!res.ok) throw new Error()
+      if (ids.length > 1) showToast(`已標記 ${ids.length} 通不是叫瓦斯`, 'info', 3000)
+    } catch {
+      showToast('標記失敗，請再試一次', 'error', 4000)
+    } finally {
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        ids.forEach(id => next.delete(id))
+        return next
+      })
+      setLoading(false)
     }
+  }
+
+  // 單筆畫面的「不是叫瓦斯」：取代原本的「略過」，會明確記成 NOT_ORDER
+  async function handleNotOrder() {
+    const id = shownUnknownId.current
+    if (id != null) await markNotOrder([id])
+    pinnedUnknownId.current = null
     setVisible(false)
     setDraft(null)
     setUnknownPhone(null)
     setMatchedCustomers([])
     setSearchMode(false)
     shownUnknownPhone.current = null
+    shownUnknownId.current = null
+    poll()
+  }
+
+  async function handleListNotOrder(ids: number[]) {
+    await markNotOrder(ids)
+    poll()
+  }
+
+  // 清單裡點「建單」：切到那一筆的單筆畫面（搜尋舊客戶／新增客戶，跟原本流程一樣）
+  function openFromList(u: UnknownCall) {
+    pinnedUnknownId.current = u.id
+    shownUnknownPhone.current = u.phone
+    shownUnknownId.current = u.id
+    shownDraftId.current = null
+    setDraft(null)
+    setUnknownPhone(u.phone)
+    setMatchedCustomers(u.matchedCustomers || [])
+    setNewName('')
+    setNewAddress('')
+    setSearchMode(true)
+    setSearchQuery('')
+    setSearchResults([])
+    setListMode(false)
+    setVisible(true)
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   if (!visible) return null
+
+  if (listMode && unknownList.length > 0) {
+    const allSelected = unknownList.length > 0 && unknownList.every(u => selectedIds.has(u.id))
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+          <div className="bg-gray-700 text-white px-5 py-4 flex items-center justify-between gap-3 rounded-t-2xl">
+            <div className="font-bold text-lg">陌生來電 · {unknownList.length} 筆待處理</div>
+            <button onClick={() => setListMode(false)} className="text-gray-300 text-sm px-2 py-1">一筆一筆看</button>
+          </div>
+
+          <div className="px-4 py-2 flex items-center justify-between border-b border-gray-100">
+            <button
+              onClick={() => setSelectedIds(allSelected ? new Set() : new Set(unknownList.map(u => u.id)))}
+              className="text-sm text-gray-500 py-1"
+            >
+              {allSelected ? '取消全選' : '全選'}
+            </button>
+            <button
+              onClick={() => handleListNotOrder([...selectedIds])}
+              disabled={loading || selectedIds.size === 0}
+              className={`text-sm px-3 py-2 rounded-xl font-medium ${selectedIds.size > 0 ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-400'}`}
+            >
+              勾選的 {selectedIds.size} 筆都「不是」
+            </button>
+          </div>
+
+          <div className="overflow-y-auto divide-y divide-gray-100">
+            {unknownList.map(u => (
+              <div key={u.id} className="flex items-center gap-3 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(u.id)}
+                  onChange={() => toggleSelected(u.id)}
+                  className="w-5 h-5 shrink-0"
+                />
+                <div className="flex-1 min-w-0" onClick={() => toggleSelected(u.id)}>
+                  <div className="text-gray-800 font-medium">
+                    {u.phone}
+                    {u.callCount > 1 && (
+                      <span className="ml-2 text-xs bg-orange-100 text-orange-700 rounded px-1.5 py-0.5">打了 {u.callCount} 次</span>
+                    )}
+                    {u.matchedCustomers?.length > 0 && (
+                      <span className="ml-2 text-xs bg-blue-50 text-blue-700 rounded px-1.5 py-0.5">一號多店</span>
+                    )}
+                  </div>
+                  <div className="text-gray-400 text-xs">{fmtCallTime(u.firstCalledAt)}</div>
+                </div>
+                <button
+                  onClick={() => handleListNotOrder([u.id])}
+                  disabled={loading}
+                  className="px-3 py-2 rounded-xl bg-gray-100 text-gray-600 text-sm font-medium shrink-0"
+                >
+                  不是
+                </button>
+                <button
+                  onClick={() => openFromList(u)}
+                  disabled={loading}
+                  className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold shrink-0"
+                >
+                  建單
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (unknownPhone) {
     return (
@@ -445,10 +601,18 @@ export default function IncomingCallModal() {
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-y-auto max-h-[90vh]">
           <div className="bg-gray-700 text-white px-5 py-4 flex items-center gap-3">
             <span className="text-3xl">📞</span>
-            <div>
+            <div className="flex-1">
               <div className="font-bold text-lg">{matchedCustomers.length > 0 ? '這通電話是哪一間？' : '陌生來電'}</div>
               <div className="text-gray-300 text-sm">{unknownPhone}</div>
             </div>
+            {unknownList.length >= 2 && (
+              <button
+                onClick={() => { pinnedUnknownId.current = null; setListMode(true) }}
+                className="text-xs bg-white/15 rounded-lg px-2.5 py-1.5 whitespace-nowrap"
+              >
+                全部列出（{unknownList.length}）
+              </button>
+            )}
           </div>
 
           {matchedCustomers.length > 0 ? (
@@ -468,8 +632,8 @@ export default function IncomingCallModal() {
                 ))}
               </div>
               <div className="px-5 pb-5">
-                <button onClick={handleDismiss} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
-                  略過
+                <button onClick={handleNotOrder} className="w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  不是叫瓦斯
                 </button>
               </div>
             </>
@@ -506,8 +670,8 @@ export default function IncomingCallModal() {
               </div>
 
               <div className="px-5 pb-5 flex gap-2">
-                <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
-                  略過
+                <button onClick={handleNotOrder} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  不是叫瓦斯
                 </button>
                 <button
                   onClick={handleDeferUnknown}
@@ -571,8 +735,8 @@ export default function IncomingCallModal() {
               </div>
 
               <div className="px-5 pb-5 flex gap-2">
-                <button onClick={handleDismiss} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
-                  略過
+                <button onClick={handleNotOrder} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-600 font-medium">
+                  不是叫瓦斯
                 </button>
                 <button
                   onClick={handleDeferUnknown}
