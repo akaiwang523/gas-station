@@ -13,6 +13,7 @@ import { predictionRoutes } from './routes/predictions'
 import { lineRoutes } from './routes/line'
 import { settingsRoutes } from './routes/settings'
 import { reconcileRoutes } from './routes/reconcile'
+import { autoCompleteStaleOrders } from './lib/autoCompleteStale'
 import { errorHandler } from './middleware/errorHandler'
 import cron from "node-cron"
 import { runDailyScheduledOrders } from "./scripts/dailyScheduledOrders"
@@ -52,7 +53,15 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(frontendDist, 'index.html'))
 })
 app.use(errorHandler)
-cron.schedule("0 6 * * *", () => {
+cron.schedule("0 6 * * *", async () => {
+  // 先把前一天沒按完成的單自動完成，再建今天的固定配送單，
+  // 避免舊單跟今天的新單混在待派送裡
+  try {
+    const r = await autoCompleteStaleOrders()
+    console.log(`[Cron] 隔日自動完成 ${r.completed} 筆`)
+  } catch (err) {
+    console.error("[Cron] 隔日自動完成失敗:", err)
+  }
   console.log("[Cron] 執行每日固定配送建單...")
   runDailyScheduledOrders().catch((err: Error) => console.error("[Cron] 建單失敗:", err))
 }, { timezone: "Asia/Taipei" })

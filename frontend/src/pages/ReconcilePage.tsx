@@ -251,6 +251,7 @@ export default function ReconcilePage({ refresh, onEditCustomer }: { refresh?: n
                     {placeholder && <span className="text-xs bg-orange-100 text-orange-700 rounded px-1.5 py-0.5">陌生</span>}
                     {o.source && <span className="text-xs text-gray-400">{SOURCE_LABEL[o.source] || o.source}</span>}
                     {o.paymentType === 'AR' && <span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">欠帳</span>}
+                    {o.note?.includes('隔日自動完成') && <span className="text-xs bg-orange-50 text-orange-700 rounded px-1.5 py-0.5">系統自動完成</span>}
                   </div>
                   <div className={`text-sm truncate ${isMissingAddress(c.address) ? 'text-orange-600' : 'text-gray-600'}`}>
                     {isMissingAddress(c.address) ? '缺地址' : c.address}
