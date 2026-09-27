@@ -187,6 +187,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   // 輪詢 LINE 活動：LINE 官方帳號進來的新訂單／新對話不會經過瀏覽器裡任何操作
   // （webhook 直接寫資料庫），所以原本要手動重新整理才看得到。這裡改成每 5 秒問一次
   // 「目前最新的 LINE 訂單/詢問 id」這種輕量資訊，發現變大了才真的重新整理整個列表
+  // 預測清單不再常駐在頁面最上方，改成頂部一顆「快用完 N 位」，點了才展開
+  const [showPredictions, setShowPredictions] = useState(false)
   const lineActivityRef = useRef<{ orderId: number; inquiryId: number } | null>(null)
   // 計時器只在第一次建立，裡面如果直接呼叫 load 會一直拿到「第一次畫面」時的舊 load（舊篩選條件），
   // 所以透過 ref 永遠呼叫最新的 load
@@ -525,23 +527,28 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   }
   return (
     <div className="max-w-lg lg:max-w-3xl mx-auto p-4 space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">📦 今日訂單 <span className="text-sm font-normal text-gray-400">{new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}</span></h2>
-      {summary && (
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-orange-50 rounded-xl p-3 text-center">
-            <div className="text-2xl font-bold text-orange-600">{summary.total_orders || 0}</div>
-            <div className="text-xs text-gray-500 mt-0.5">總訂單</div>
-          </div>
-          <div className="bg-blue-50 rounded-xl p-3 text-center">
-            <div className="text-2xl font-bold text-blue-600">{summary.total_cylinders || 0}</div>
-            <div className="text-xs text-gray-500 mt-0.5">總桶數</div>
-          </div>
-          <div className="bg-green-50 rounded-xl p-3 text-center">
-            <div className="text-lg font-bold text-green-600">${Number(summary.cash_amount || 0).toLocaleString()}</div>
-            <div className="text-xs text-gray-500 mt-0.5">現金收入</div>
-          </div>
+      {/* 頂部：日期＋一行精簡統計（今天已送達口徑，跟「已完成」分頁一致），右邊是預測入口 */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h2 className="text-lg font-bold text-gray-800">
+            {new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}
+          </h2>
+          {summary && (
+            <span className="text-sm text-gray-500">
+              今日已送 {summary.delivered_orders ?? 0} 單 · {summary.delivered_cylinders ?? 0} 桶 · 現金 ${Number(summary.delivered_cash || 0).toLocaleString()}
+              {Number(summary.delivered_ar || 0) > 0 && <> · 欠帳 ${Number(summary.delivered_ar).toLocaleString()}</>}
+            </span>
+          )}
         </div>
-      )}
+        {(predictions.length > 0 || lowConfPredictions.length > 0) && (
+          <button
+            onClick={() => { setShowPredictions(v => !v); setPredExpanded(true) }}
+            className={`px-3 py-1.5 rounded-full text-sm border transition ${showPredictions ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700 border-blue-200'}`}
+          >
+            快用完 {predictions.length} 位 {showPredictions ? '▲' : '›'}
+          </button>
+        )}
+      </div>
       {drafts.length > 0 && (
         <div className="bg-orange-50 rounded-xl p-3 border border-orange-200">
           <div className="text-sm font-bold text-orange-800 mb-2">📞 來電草稿（待確認）<span className="ml-2 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{drafts.length}</span></div>
@@ -692,7 +699,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           </div>
         </div>
       )}
-      {predictions.length > 0 && (
+      {showPredictions && predictions.length > 0 && (
         <div className="bg-blue-50 rounded-xl p-3">
           <button
             className="w-full flex items-center justify-between"
@@ -708,7 +715,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           )}
         </div>
       )}
-      {lowConfPredictions.length > 0 && (
+      {showPredictions && lowConfPredictions.length > 0 && (
         <div className="bg-gray-50 rounded-xl p-3">
           <button
             className="w-full flex items-center justify-between"
@@ -777,7 +784,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           const countKey = s === 'PENDING' ? 'pending' : s === 'DELIVERING' ? 'delivering' : s === 'DELIVERED' ? 'delivered' : 'scheduled'
           const count = counts?.[countKey]
           return (
-          <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
+          <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
             {s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
             {count != null && <span className="ml-1 opacity-70">{count}</span>}
           </button>
@@ -787,7 +794,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         {pending.length > 0 && (
           <button
             onClick={toggleSelectMode}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${selectMode ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${selectMode ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
           >
             ☑️ 多選
           </button>

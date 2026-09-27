@@ -270,6 +270,20 @@ export async function collectPayment(req: Request, res: Response) {
 }
 
 export async function getTodaySummary(_req: Request, res: Response) {
+  // 訂單頁頂部的統計改成「今天已送達」口徑，跟「已完成」分頁（getOrderCounts.delivered /
+  // listOrders 的 DELIVERED 過濾）用同一個條件，數字才對得起來。
+  // 原本用「今天建立或排定」算總訂單，昨天建立今天才送的單不會算進去，
+  // 就會出現「總訂單 5、已完成 14」這種互相矛盾的畫面
+  const [deliveredRows] = await db.query(
+    `SELECT
+      COUNT(*) AS delivered_orders,
+      COALESCE(SUM(quantity), 0) AS delivered_cylinders,
+      COALESCE(SUM(CASE WHEN payment_type != 'AR' THEN total_amount ELSE 0 END), 0) AS delivered_cash,
+      COALESCE(SUM(CASE WHEN payment_type = 'AR' THEN total_amount ELSE 0 END), 0) AS delivered_ar
+     FROM orders
+     WHERE status = 'DELIVERED' AND DATE(delivered_at) = CURDATE()`
+  ) as any
+
   const [rows] = await db.query(
     `SELECT 
       COUNT(*) as total_orders,
@@ -282,7 +296,7 @@ export async function getTodaySummary(_req: Request, res: Response) {
      FROM orders
      WHERE DATE(COALESCE(scheduled_date, created_at)) = CURDATE() AND status != 'CANCELLED'`
   ) as any
-  res.json(rows[0])
+  res.json({ ...rows[0], ...deliveredRows[0] })
 }
 
 export async function cancelOrder(req: Request, res: Response) {

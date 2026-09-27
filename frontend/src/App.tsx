@@ -56,19 +56,19 @@ export default function App() {
       <IncomingCallModal />
 
       {/* Header */}
-      <div className="bg-orange-500 text-white px-4 py-3 flex justify-between items-center sticky top-0 z-10 shadow">
-        <span className="font-bold text-lg">🔥 瓦斯行管理</span>
+      <div className="bg-white text-gray-800 px-4 py-3 flex justify-between items-center sticky top-0 z-10 border-b border-gray-200">
+        <span className="font-bold text-lg">瓦斯行管理</span>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowSettings(true)}
-            className="text-orange-100 text-lg"
+            className="text-gray-500 text-lg"
             title="基準價設定"
           >
             🔧
           </button>
           <button
             onClick={() => { localStorage.removeItem('token'); setAuthed(false) }}
-            className="text-orange-100 text-sm"
+            className="text-gray-500 text-sm"
           >
             登出
           </button>
@@ -103,10 +103,9 @@ export default function App() {
           <button
             key={item.key}
             onClick={() => setPage(item.key)}
-            className={`flex-1 py-3 flex flex-col items-center gap-0.5 transition ${page === item.key ? 'text-orange-500' : 'text-gray-400'}`}
+            className={`flex-1 py-4 flex items-center justify-center transition ${page === item.key ? 'text-blue-600 font-bold' : 'text-gray-500'}`}
           >
-            <span className="text-xl">{item.icon}</span>
-            <span className="text-xs font-medium">{item.label}</span>
+            <span className="text-base">{item.label}</span>
           </button>
         ))}
       </div>
