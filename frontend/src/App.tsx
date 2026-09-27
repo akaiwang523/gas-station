@@ -5,12 +5,13 @@ import OrderList from './pages/OrderList'
 import ArPage from './pages/ArPage'
 import ReportPage from './pages/ReportPage'
 import CustomerPage from './pages/CustomerPage'
+import ReconcilePage from './pages/ReconcilePage'
 import IncomingCallModal from './components/IncomingCallModal'
 import BaselinePriceSettings from './components/BaselinePriceSettings'
 import ToastContainer from './components/ToastContainer'
 import './index.css'
 
-type Page = 'orders' | 'new' | 'ar' | 'customers' | 'report'
+type Page = 'orders' | 'new' | 'reconcile' | 'ar' | 'customers' | 'report'
 
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'))
@@ -43,6 +44,7 @@ export default function App() {
   const navItems: { key: Page; label: string; icon: string }[] = [
     { key: 'orders', label: '訂單', icon: '📦' },
     { key: 'new', label: '接單', icon: '➕' },
+    { key: 'reconcile', label: '對帳', icon: '✅' },
     { key: 'ar', label: '欠帳', icon: '📒' },
     { key: 'customers', label: '客戶', icon: '👥' },
     { key: 'report', label: '報表', icon: '📊' },
@@ -79,6 +81,7 @@ export default function App() {
       <div className="pt-2">
         {page === 'orders' && <OrderList refresh={orderRefresh} onEditCustomer={handleEditCustomer} />}
         {page === 'new' && <NewOrder onOrderCreated={handleOrderCreated} />}
+        {page === 'reconcile' && <ReconcilePage refresh={orderRefresh} onEditCustomer={handleEditCustomer} />}
         {page === 'ar' && <ArPage />}
         {page === 'customers' && <CustomerPage openEditId={customerEditId} onOpenEditConsumed={() => setCustomerEditId(null)} />}
         {page === 'report' && <ReportPage onEditCustomer={handleEditCustomer} />}

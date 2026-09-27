@@ -132,6 +132,12 @@ export const api = {
 
   // Settings
   getBaselinePrices: () => request('/settings/baseline-prices'),
+  // 每日對帳
+  getReconcileDay: (date: string) => request(`/reconcile?date=${date}`),
+  setOrdersVerified: (ids: number[], verified: boolean) =>
+    request('/reconcile/verify', { method: 'POST', body: JSON.stringify({ ids, verified }) }),
+  voidUnverifiedOrders: (ids: number[]) =>
+    request('/reconcile/void', { method: 'POST', body: JSON.stringify({ ids }) }),
   updateBaselinePrices: (prices: Record<string, number>) =>
     request('/settings/baseline-prices', { method: 'PUT', body: JSON.stringify({ prices }) }),
 }

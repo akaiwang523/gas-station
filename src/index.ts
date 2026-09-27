@@ -12,6 +12,7 @@ import { gasReturnRoutes } from './routes/gasReturns'
 import { predictionRoutes } from './routes/predictions'
 import { lineRoutes } from './routes/line'
 import { settingsRoutes } from './routes/settings'
+import { reconcileRoutes } from './routes/reconcile'
 import { errorHandler } from './middleware/errorHandler'
 import cron from "node-cron"
 import { runDailyScheduledOrders } from "./scripts/dailyScheduledOrders"
@@ -37,6 +38,7 @@ app.use('/api/auth', authRoutes)
 app.use('/api/customers', customerRoutes)
 app.use('/api/caller', callerRoutes)
 app.use('/api/orders', orderRoutes)
+app.use('/api/reconcile', reconcileRoutes)
 app.use('/api/ar', arRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/gas-returns', gasReturnRoutes)
