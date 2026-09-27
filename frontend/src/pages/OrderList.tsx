@@ -349,8 +349,16 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     try { await api.updateOrderStatus(id, 'PENDING'); await load() }
     finally { setActionId(null) }
   }
-  async function cancelOrder(id: number) {
-    if (!window.confirm('確定要取消這筆訂單嗎？')) return
+  // 防呆：確認框寫出客戶、品項、金額，避免在清單上點錯列取消到別人的單
+  async function cancelOrder(order: Order) {
+    const id = order.id
+    const who = order.customer_name || order.customer_phone || `#${id}`
+    const items = order.items && order.items.length > 0
+      ? order.items.map((i: any) => `${GAS_LABELS[i.gas_type] || i.gas_type}×${i.quantity}`).join('、')
+      : `${order.quantity} 桶`
+    const amount = `$${Number(order.total_amount).toLocaleString()}`
+    const ar = order.payment_type === 'AR' ? '\n（欠帳單，取消後會把欠款扣回）' : ''
+    if (!window.confirm(`確定取消這張訂單？\n\n${who}\n${items}　${amount}${ar}\n\n取消後會從待送清單移除。`)) return
     setActionId(id)
     try { await api.cancelOrder(id); await load() }
     finally { setActionId(null) }
@@ -993,6 +1001,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="15" height="10" rx="1"/><path d="M16 10h4l3 3v4h-7z"/><circle cx="6" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>
                         開始配送
                       </button>
+                      <button onClick={() => cancelOrder(order)} disabled={actionId === order.id}
+                        className="h-9 px-3 flex items-center justify-center border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200 disabled:opacity-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
+                        取消
+                      </button>
                       <button onClick={() => toggleExpand(order)} className="w-7 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 flex-shrink-0" title="更多">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                       </button>
@@ -1158,7 +1170,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       📅 延到明天
                     </button>
                   )}
-                  <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
+                  <button onClick={e => { e.stopPropagation(); cancelOrder(order) }} disabled={actionId === order.id}
                     className="hidden lg:block w-full text-center text-sm text-gray-400 hover:text-red-500 py-1.5">
                     取消此筆訂單
                   </button>
@@ -1166,7 +1178,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               )}
               {/* 操作按鈕（僅直向卡片使用，橫向已內嵌於單行列） */}
               <div className="lg:hidden flex gap-2 mt-3">
-                <button onClick={e => { e.stopPropagation(); cancelOrder(order.id) }} disabled={actionId === order.id}
+                <button onClick={e => { e.stopPropagation(); cancelOrder(order) }} disabled={actionId === order.id}
                   className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
                   取消
                 </button>
