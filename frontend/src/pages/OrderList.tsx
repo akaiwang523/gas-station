@@ -22,6 +22,17 @@ type Order = {
 // 訂單來源小標籤：目前只標 LINE（使用者最在意的區分），
 // CALLER/SCHEDULED/MANUAL 已有別的方式看得出來（來電草稿區塊、已排定標籤等），先不加字重複
 function SourceBadge({ source }: { source: string | null | undefined }) {
+  // 2026-09-27 起來電直接進單、不再跳窗確認，所以來電單也要標出來，
+  // 一眼跟人工輸入的單分開（晚上在「對帳」頁用紙本出貨單核對）
+  if (source === 'CALLER') {
+    return (
+      <span
+        className="text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap flex-shrink-0"
+        style={{ background: '#DBEAFE', color: '#1D4ED8' }}
+        title="來電自動建單，內容照上一單帶入，請以出貨單為準"
+      >📞 來電</span>
+    )
+  }
   if (source !== 'LINE') return null
   return (
     <span

@@ -157,7 +157,26 @@ export async function incomingCall(req: Request, res: Response) {
      WHERE ${PHONE_MATCH_SQL} AND ${NOT_MERGED_SQL} ORDER BY c.id ASC`,
     phoneMatchParams(normalized)
   ) as any
-  const rows: any[] = pickCandidates(allRows)
+  let rows: any[] = pickCandidates(allRows)
+
+  // 2026-09-27 改版：來電一律直接進單（PENDING），不再跳窗確認，晚上拿紙本出貨單在「對帳」頁核對。
+  // 陌生號碼 → 自動建一筆「來電 09xx」客戶＋一張單；不是叫瓦斯的，對帳時作廢就好。
+  // 一號多店（對到不只一間）仍然進佇列跳窗讓人選，避免記錯店、價格地址跟著錯。
+  const AUTO_CREATE_UNKNOWN = true
+
+  if (rows.length === 0 && AUTO_CREATE_UNKNOWN) {
+    const [result] = await db.query(
+      'INSERT INTO customers (name, phone, address, status) VALUES (?, ?, ?, ?)',
+      [`來電 ${normalized}`, normalized, '（待補）', 'ACTIVE']
+    ) as any
+    await db.query('INSERT INTO ar_balances (customer_id, amount_owed, cylinders_owed) VALUES (?, 0, 0)', [result.insertId])
+    const [created] = await db.query(
+      `SELECT c.*, a.amount_owed, a.cylinders_owed FROM customers c
+       LEFT JOIN ar_balances a ON a.customer_id = c.id WHERE c.id = ?`,
+      [result.insertId]
+    ) as any
+    rows = created
+  }
 
   if (rows.length === 0) {
     // 陌生號碼，寫進資料庫（同號碼重複來電只累加次數，不重複建列）
@@ -287,8 +306,8 @@ export async function incomingCall(req: Request, res: Response) {
 
     const [result] = await db.query(
       `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, payment_type, note, call_time, source)
-       VALUES (?, ?, ?, ?, 'DRAFT', 'CASH', ?, NOW(), 'CALLER')`,
-      [c.id, totalQuantity, avgUnitPrice, totalAmount, `來電自動草稿 ${normalized}`]
+       VALUES (?, ?, ?, ?, 'PENDING', 'CASH', ?, NOW(), 'CALLER')`,
+      [c.id, totalQuantity, avgUnitPrice, totalAmount, `來電自動建單 ${normalized}`]
     ) as any
 
     draftId = result.insertId
