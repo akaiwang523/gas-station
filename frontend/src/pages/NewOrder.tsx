@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { showToast } from '../lib/toast'
 
@@ -42,7 +42,7 @@ const FALLBACK_PRICE: Record<string, number> = {
 }
 
 export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => void }) {
-  // 全站基準價（可在「🔧 基準價設定」調整），未設定特殊單價的客戶都以此為準
+  // 全站基準價（可在「基準價設定」調整），未設定特殊單價的客戶都以此為準
   const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>(FALLBACK_PRICE)
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Customer[]>([])
@@ -284,258 +284,310 @@ export default function NewOrder({ onOrderCreated }: { onOrderCreated?: () => vo
   const gasTotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const total = gasTotal + stairFee
 
+  const hasInput = !!(selected || isNew || search || stairFee || note || scheduledDate || callTime)
+  const today = new Date().toLocaleDateString('en-CA')
+  const moreSet = [scheduledDate && `配送 ${scheduledDate}`, callTime && '已設來電時間'].filter(Boolean).join('・')
+
   return (
-    <div className="max-w-lg mx-auto p-4 space-y-4">
-      <h2 className="text-xl font-bold text-gray-800">📋 快速接單</h2>
+    <div className="max-w-3xl mx-auto px-4 pt-3 pb-44 space-y-3 text-slate-800">
+      {/* 頁首 */}
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
+          <IconClipboard className="w-5 h-5 text-slate-500" />
+          快速接單
+        </h2>
+        {hasInput && (
+          <button onClick={reset} className="text-sm text-slate-500 hover:text-slate-800 px-2 py-1 -mr-2">清除</button>
+        )}
+      </div>
 
-      {success && <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm font-medium">{success}</div>}
-      {error && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-sm">{error}</div>}
+      {success && <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl px-4 py-3 text-sm font-medium">{success}</div>}
+      {error && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl px-4 py-3 text-sm">{error}</div>}
 
-      {/* 客戶搜尋 */}
-      <div className="relative">
-        <label className="block text-sm font-medium text-gray-700 mb-1">客戶（姓名或電話）</label>
-        <input
-          className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          placeholder="輸入姓名或電話搜尋..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setSelected(null); setIsNew(false); setLastOrderHint('') }}
-        />
-        {(results.length > 0 || (search.length > 0 && !selected && !isNew)) && (
-          <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 max-h-60 overflow-y-auto">
-            {results.map(c => (
-              <div key={c.id} className="px-4 py-3 hover:bg-orange-50 cursor-pointer border-b" onClick={() => selectCustomer(c)}>
-                <div className="font-medium text-gray-800">{c.name}</div>
-                <div className="text-sm text-gray-500">{c.phone}　{c.address}</div>
-                {Number(c.amount_owed) > 0 && <div className="text-xs text-red-500 mt-0.5">欠款 ${Number(c.amount_owed).toLocaleString()}</div>}
+      {/* 客戶 */}
+      <section className={CARD}>
+        <div className={LABEL}>客戶</div>
+        {!selected && !isNew ? (
+          <div className="relative">
+            <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+            <input
+              className="w-full h-12 border border-slate-300 rounded-xl pl-11 pr-4 text-base focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+              placeholder="搜尋姓名或電話"
+              value={search}
+              onChange={e => { setSearch(e.target.value); setSelected(null); setIsNew(false); setLastOrderHint('') }}
+            />
+            {search.length > 0 && (
+              <div className="absolute z-20 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 max-h-72 overflow-y-auto">
+                {results.map(c => (
+                  <div key={c.id} className="px-4 py-3 hover:bg-orange-50 active:bg-orange-50 cursor-pointer border-b border-slate-100" onClick={() => selectCustomer(c)}>
+                    <div className="font-medium">{c.name}</div>
+                    <div className="text-sm text-slate-500">{c.phone}　{c.address}</div>
+                    {Number(c.amount_owed) > 0 && <div className="text-xs text-red-500 mt-0.5">欠款 ${Number(c.amount_owed).toLocaleString()}</div>}
+                  </div>
+                ))}
+                <div className="px-4 py-3 hover:bg-slate-50 cursor-pointer text-slate-700 font-medium flex items-center gap-2" onClick={selectNew}>
+                  <IconPlus className="w-4 h-4" /> 新客人「{search}」
+                </div>
+              </div>
+            )}
+          </div>
+        ) : selected ? (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-lg font-bold leading-tight">{selected.name}</div>
+              <div className="text-sm text-slate-500 mt-0.5">{selected.phone}　{selected.address}</div>
+              {Number(selected.amount_owed) > 0 && <div className="text-sm text-red-500 mt-1">目前欠款 ${Number(selected.amount_owed).toLocaleString()}</div>}
+              {lastOrderHint && <div className="text-xs text-slate-500 mt-1">{lastOrderHint}</div>}
+            </div>
+            <button onClick={reset} className="shrink-0 text-sm text-slate-500 border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50">更換</button>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-600">新客人資料</span>
+              <button onClick={reset} className="text-sm text-slate-500 border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50">取消</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <input className={INPUT} placeholder="姓名（必填）" value={newName} onChange={e => setNewName(e.target.value)} />
+              <input className={INPUT} placeholder="電話（必填）" inputMode="tel" value={newPhone} onChange={e => setNewPhone(e.target.value)} />
+            </div>
+            <input className={INPUT} placeholder="地址（必填）" value={newAddress} onChange={e => setNewAddress(e.target.value)} />
+            <div>
+              <div className="text-xs text-slate-500 mb-1.5">客戶類型（必選，影響預測補貨提醒）</div>
+              <Segmented
+                value={newCustomerType}
+                onChange={setNewCustomerType}
+                options={[{ value: 'COMMERCIAL', label: '營業用' }, { value: 'RESIDENTIAL', label: '一般住家' }]}
+              />
+            </div>
+          </div>
+        )}
+
+        {pendingReturns.length > 0 && (
+          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 space-y-1">
+            <div className="text-sm font-medium text-amber-700">有待處理存氣</div>
+            {pendingReturns.map((r: any) => (
+              <div key={r.id} className="flex justify-between items-center text-sm">
+                <span className="text-amber-700">剩餘 {r.remaining_kg} kg · {r.action === 'REFUND' ? '待退費' : '待抵扣'} ${Number(r.amount).toLocaleString()}</span>
+                <button onClick={async () => { await api.resolveReturn(r.id); setPendingReturns(prev => prev.filter(x => x.id !== r.id)) }} className="text-xs text-amber-700 underline px-1 py-1">標記完成</button>
               </div>
             ))}
-            {search.length > 0 && (
-              <div className="px-4 py-3 hover:bg-blue-50 cursor-pointer text-blue-600 font-medium flex items-center gap-2" onClick={selectNew}>
-                <span>➕</span> 新客人「{search}」
+          </div>
+        )}
+      </section>
+
+      {/* 訂單品項 */}
+      <section className={CARD}>
+        <div className={LABEL}>訂單品項</div>
+        <div className="space-y-2.5">
+          {items.map((item, idx) => (
+            <div key={idx} className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+              {/* 規格 */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <Segmented
+                    value={item.gas_type}
+                    onChange={v => updateItem(idx, 'gas_type', v)}
+                    options={GAS_OPTIONS.map(o => ({ value: o.type, label: o.label }))}
+                    compact
+                  />
+                </div>
+                {items.length > 1 && (
+                  <button onClick={() => removeItem(idx)} aria-label="刪除品項" className="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50">
+                    <IconTrash className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+
+              {/* 數量 / 單價 / 小計 */}
+              <div className="grid grid-cols-[auto_minmax(5.5rem,1fr)_auto] sm:grid-cols-[auto_12rem_1fr] gap-2 sm:gap-3 items-end mt-3">
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">數量</div>
+                  <div className="flex items-center h-11 border border-slate-300 rounded-xl bg-white overflow-hidden">
+                    <button onClick={() => updateItem(idx, 'quantity', Math.max(1, item.quantity - 1))} aria-label="減少" className="w-10 h-full flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:text-slate-300" disabled={item.quantity <= 1}>
+                      <IconMinus className="w-4 h-4" />
+                    </button>
+                    <span className="w-8 text-center text-lg font-bold tabular-nums">{item.quantity}</span>
+                    <button onClick={() => updateItem(idx, 'quantity', item.quantity + 1)} aria-label="增加" className="w-10 h-full flex items-center justify-center text-slate-600 hover:bg-slate-100">
+                      <IconPlus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-500 mb-1">單價</div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">$</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      className="w-full h-11 border border-slate-300 rounded-xl pl-7 pr-2 text-base tabular-nums bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
+                      value={item.unit_price || ''}
+                      placeholder="0"
+                      onChange={e => updateItem(idx, 'unit_price', Number(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+                <div className="text-right min-w-[3.5rem]">
+                  <div className="text-xs text-slate-500 mb-1">小計</div>
+                  <div className="h-11 flex items-center justify-end text-lg font-bold tabular-nums">${(item.quantity * item.unit_price).toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={addItem} className="mt-2.5 w-full h-11 flex items-center justify-center gap-1.5 border border-slate-300 bg-white rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50">
+          <IconPlus className="w-4 h-4" /> 新增品項
+        </button>
+
+        {!isNew && selected && (
+          <div className="mt-3 text-sm text-slate-600 space-y-1.5">
+            <label className="flex items-center gap-2 py-1">
+              <input type="checkbox" className="w-4 h-4 accent-orange-500" checked={rememberPrice} onChange={e => setRememberPrice(e.target.checked)} />
+              記住這個單價（存成 {selected.name} 的特殊單價，以後自動帶入）
+            </label>
+            {rememberPrice && new Set(items.map(i => i.unit_price)).size > 1 && (
+              <div className="flex items-center gap-2 pl-6 flex-wrap">
+                <span>單價不同，記住哪一個：</span>
+                <select className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white" value={rememberPriceIndex} onChange={e => setRememberPriceIndex(Number(e.target.value))}>
+                  {items.map((it, idx) => (
+                    <option key={idx} value={idx}>{GAS_LABELS[it.gas_type] || it.gas_type} — ${it.unit_price}</option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* 選中客戶 */}
-      {selected && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex justify-between items-start">
-          <div>
-            <div className="font-medium text-gray-800">{selected.name}</div>
-            <div className="text-sm text-gray-600">{selected.phone}　{selected.address}</div>
-            {Number(selected.amount_owed) > 0 && <div className="text-sm text-red-500 mt-1">⚠️ 目前欠款 ${Number(selected.amount_owed).toLocaleString()}</div>}
-            {lastOrderHint && <div className="text-xs text-orange-600 mt-1">🕐 {lastOrderHint}</div>}
-          </div>
-          <button onClick={reset} className="text-gray-400 text-xl">×</button>
-        </div>
-      )}
-
-      {/* 新客人資料 */}
-      {isNew && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm font-medium text-blue-700">新客人資料</span>
-            <button onClick={reset} className="text-gray-400 text-xl">×</button>
-          </div>
-          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="姓名 *" value={newName} onChange={e => setNewName(e.target.value)} />
-          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="電話 *" value={newPhone} onChange={e => setNewPhone(e.target.value)} />
-          <input className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="地址 *" value={newAddress} onChange={e => setNewAddress(e.target.value)} />
-          <select
-            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
-            value={newCustomerType}
-            onChange={e => setNewCustomerType(e.target.value)}
-          >
-            <option value="">客戶類型 *（會影響之後的預測補貨提醒）</option>
-            <option value="COMMERCIAL">🏪 營業用</option>
-            <option value="RESIDENTIAL">🏠 一般住家</option>
-          </select>
-        </div>
-      )}
-
-      {/* 品項 */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">品項</label>
-        <div className="space-y-3">
-          {items.map((item, idx) => (
-            <div key={idx} className="bg-gray-50 rounded-xl p-3 space-y-3">
-              {/* 規格快選 */}
-              <div className="flex justify-between items-center">
-                <div className="flex gap-2 flex-wrap">
-                  {GAS_OPTIONS.map(opt => (
-                    <button
-                      key={opt.type}
-                      onClick={() => updateItem(idx, 'gas_type', opt.type)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${item.gas_type === opt.type ? 'bg-orange-500 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:border-orange-400'}`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                {items.length > 1 && (
-                  <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 text-lg font-bold ml-2">×</button>
-                )}
-              </div>
-
-              {/* 桶數 + 單價 */}
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <button onClick={() => updateItem(idx, 'quantity', Math.max(1, item.quantity - 1))} className="w-9 h-9 rounded-full bg-gray-200 hover:bg-gray-300 text-lg font-bold transition">−</button>
-                  <span className="text-xl font-bold text-gray-800 w-8 text-center">{item.quantity}</span>
-                  <button onClick={() => updateItem(idx, 'quantity', item.quantity + 1)} className="w-9 h-9 rounded-full bg-orange-500 hover:bg-orange-600 text-white text-lg font-bold transition">+</button>
-                </div>
-                <span className="text-gray-400 text-sm">×</span>
-                {/* 單價快選 */}
-                <div className="flex-1">
-                  <div className="flex gap-1.5 flex-wrap mb-1.5">
-                    {[item.unit_price - 50, item.unit_price, item.unit_price + 50].map(p => (
-                      <button key={p} onClick={() => updateItem(idx, 'unit_price', p)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${item.unit_price === p ? 'bg-gray-700 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-400'}`}>
-                        ${p}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="number"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                    value={item.unit_price}
-                    onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))}
-                  />
-                </div>
-                <div className="text-base font-bold text-orange-600 w-20 text-right">${(item.quantity * item.unit_price).toLocaleString()}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <button onClick={addItem} className="mt-2 w-full border-2 border-dashed border-gray-300 hover:border-orange-400 text-gray-500 hover:text-orange-500 rounded-xl py-2.5 text-sm font-medium transition">
-          + 新增品項
-        </button>
-      </div>
-
-      {!isNew && selected && (
-        <div className="text-sm text-gray-600 -mt-2 space-y-1.5">
-          <label className="flex items-center gap-2">
+      {/* 樓梯費 + 付款方式（平板並排） */}
+      <section className={`${CARD} grid grid-cols-1 sm:grid-cols-2 gap-4`}>
+        <div>
+          <div className={LABEL}>樓梯費</div>
+          <div className="relative">
             <input
-              type="checkbox"
-              className="w-4 h-4 accent-orange-500"
-              checked={rememberPrice}
-              onChange={e => setRememberPrice(e.target.checked)}
+              type="number"
+              inputMode="numeric"
+              className={`${INPUT} pr-10 tabular-nums`}
+              value={stairFee || ''}
+              placeholder="0"
+              onChange={e => setStairFee(Number(e.target.value) || 0)}
             />
-            🔒 記住這個單價（存成 {selected.name} 的特殊單價，以後自動帶入）
-          </label>
-          {rememberPrice && new Set(items.map(i => i.unit_price)).size > 1 && (
-            <div className="flex items-center gap-2 pl-6">
-              <span>這幾個品項單價不同，記住哪一個：</span>
-              <select
-                className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
-                value={rememberPriceIndex}
-                onChange={e => setRememberPriceIndex(Number(e.target.value))}
-              >
-                {items.map((it, idx) => (
-                  <option key={idx} value={idx}>
-                    {GAS_LABELS[it.gas_type] || it.gas_type} — ${it.unit_price}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 樓梯費 */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700 whitespace-nowrap">樓梯費</label>
-        <input type="number" className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" value={stairFee || ''} placeholder="0" onChange={e => setStairFee(Number(e.target.value) || 0)} />
-        <span className="text-sm text-gray-500">元</span>
-      </div>
-
-      {/* 付款方式 */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">付款方式</label>
-        <div className="flex gap-3">
-          <button onClick={() => setPaymentType('CASH')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'CASH' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-600'}`}>💵 現金</button>
-          <button onClick={() => setPaymentType('AR')} className={`flex-1 py-3 rounded-xl font-medium transition ${paymentType === 'AR' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600'}`}>📒 欠帳</button>
-        </div>
-      </div>
-
-      {/* 配送日期（留空＝今天；選未來日期＝排定；選過去日期＝補登漏單） */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">配送日期（選填，留空＝今天）</label>
-        <input
-          type="date"
-          className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          value={scheduledDate}
-          onChange={e => setScheduledDate(e.target.value)}
-        />
-        {scheduledDate && scheduledDate > new Date().toLocaleDateString('en-CA') && (
-          <div className="text-orange-500 text-xs mt-1.5">⚠️ 此單將排定於 {scheduledDate}，在那天之前不會出現在待派送佇列</div>
-        )}
-        {scheduledDate && scheduledDate < new Date().toLocaleDateString('en-CA') && (
-          <div className="text-blue-500 text-xs mt-1.5">📅 補登單，會立即出現在待送清單，報表歸入 {scheduledDate}</div>
-        )}
-      </div>
-
-      {/* 來電時間（留空＝現在，補紙本單/事後轉述時可以手動調整成實際來電時間） */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">來電時間（選填，留空＝現在）</label>
-        <input
-          type="datetime-local"
-          className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-orange-400"
-          value={callTime}
-          onChange={e => setCallTime(e.target.value)}
-        />
-        {callTime && (
-          <div className="text-gray-400 text-xs mt-1.5">補紙本單或事後轉述時，可以調整成客人實際來電的時間</div>
-        )}
-      </div>
-
-      {/* 待處理存氣提醒 */}
-      {pendingReturns.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 space-y-1">
-          <div className="text-sm font-medium text-yellow-700">⚠️ 有待處理存氣</div>
-          {pendingReturns.map((r: any) => (
-            <div key={r.id} className="flex justify-between items-center text-sm">
-              <span className="text-yellow-700">剩餘 {r.remaining_kg} kg · {r.action === 'REFUND' ? '待退費' : '待抵扣'} ${Number(r.amount).toLocaleString()}</span>
-              <button onClick={async () => { await api.resolveReturn(r.id); setPendingReturns(prev => prev.filter(x => x.id !== r.id)) }} className="text-xs text-yellow-600 underline">標記完成</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 備註 */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">備註（選填）</label>
-        <input className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="不急、指定時間..." value={note} onChange={e => setNote(e.target.value)} />
-      </div>
-
-      {/* 合計 */}
-      <div className="bg-gray-50 rounded-xl p-4 space-y-1">
-        {items.map((item, idx) => (
-          <div key={idx} className="flex justify-between text-sm text-gray-500">
-            <span>{GAS_LABELS[item.gas_type]} × {item.quantity}</span>
-            <span>${(item.quantity * item.unit_price).toLocaleString()}</span>
+            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-sm text-slate-400 pointer-events-none">元</span>
           </div>
-        ))}
-        {stairFee > 0 && <div className="flex justify-between text-sm text-gray-500"><span>樓梯費</span><span>${stairFee.toLocaleString()}</span></div>}
-        <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-          <span className="text-gray-600 font-medium">合計金額</span>
-          <span className="text-2xl font-bold text-orange-600">${total.toLocaleString()}</span>
         </div>
-      </div>
+        <div>
+          <div className={LABEL}>付款方式</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setPaymentType('CASH')}
+              className={`h-11 rounded-xl text-base font-medium border transition ${paymentType === 'CASH' ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}
+            >現金</button>
+            <button
+              onClick={() => setPaymentType('AR')}
+              className={`h-11 rounded-xl text-base font-medium border transition ${paymentType === 'AR' ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}
+            >記帳</button>
+          </div>
+        </div>
+      </section>
 
-      <div className="flex gap-2">
-        <button onClick={handleSubmit} disabled={loading || (!selected && !isNew)} className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg transition">
-          {loading ? '建單中...' : '✅ 建立訂單'}
-        </button>
-        <button
-          onClick={handleDeferredSubmit}
-          disabled={loading || (!selected && !isNew)}
-          title="不用等回應，立刻回到訂單列表，建單在背景處理"
-          className="px-4 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-300 text-gray-600 font-medium py-4 rounded-xl text-sm transition whitespace-nowrap"
-        >
-          📤 稍後建單
-        </button>
+      {/* 備註 + 其他設定 */}
+      <section className={CARD}>
+        <div className={LABEL}>備註</div>
+        <input className={INPUT} placeholder="不急、指定時間…（選填）" value={note} onChange={e => setNote(e.target.value)} />
+
+        <details className="mt-3 group" open={!!(scheduledDate || callTime)}>
+          <summary className="list-none cursor-pointer flex items-center justify-between text-sm text-slate-600 py-1">
+            <span>配送日期／來電時間{moreSet ? `（${moreSet}）` : '（預設今天、現在）'}</span>
+            <IconChevron className="w-4 h-4 text-slate-400 transition group-open:rotate-180" />
+          </summary>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <div className="text-xs text-slate-500 mb-1">配送日期（留空＝今天）</div>
+              <input type="date" className={INPUT} value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+              {scheduledDate && scheduledDate > today && (
+                <div className="text-orange-600 text-xs mt-1.5">此單排定於 {scheduledDate}，那天之前不會出現在待派送佇列</div>
+              )}
+              {scheduledDate && scheduledDate < today && (
+                <div className="text-slate-500 text-xs mt-1.5">補登單，會立即出現在待送清單，報表歸入 {scheduledDate}</div>
+              )}
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">來電時間（留空＝現在）</div>
+              <input type="datetime-local" className={INPUT} value={callTime} onChange={e => setCallTime(e.target.value)} />
+            </div>
+          </div>
+        </details>
+      </section>
+
+      {/* 金額摘要 */}
+      <section className={CARD}>
+        <div className="space-y-1.5 text-sm text-slate-600">
+          <div className="flex justify-between"><span>小計</span><span className="tabular-nums">${gasTotal.toLocaleString()}</span></div>
+          <div className="flex justify-between"><span>樓梯費</span><span className="tabular-nums">${stairFee.toLocaleString()}</span></div>
+        </div>
+        <div className="flex justify-between items-end pt-3 mt-3 border-t border-slate-200">
+          <span className="font-medium text-slate-700">應收總額{paymentType === 'AR' && <span className="ml-1.5 text-xs text-slate-500">記帳</span>}</span>
+          <span className="text-3xl font-bold text-orange-600 tabular-nums leading-none">${total.toLocaleString()}</span>
+        </div>
+      </section>
+
+      {/* 主要操作：固定在底部導覽列上方 */}
+      <div className="fixed bottom-16 left-0 right-0 z-10 px-3 pb-2">
+        <div className="max-w-3xl mx-auto bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-lg p-2 flex gap-2">
+          <button
+            onClick={handleDeferredSubmit}
+            disabled={loading || (!selected && !isNew)}
+            title="不用等回應，立刻回到訂單列表，建單在背景處理"
+            className="px-4 h-14 rounded-xl text-sm font-medium text-slate-600 border border-slate-300 bg-white hover:bg-slate-50 disabled:text-slate-300 disabled:border-slate-200 whitespace-nowrap"
+          >稍後建單</button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || (!selected && !isNew)}
+            className="flex-1 h-14 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:bg-slate-300 text-white text-lg font-bold flex items-center justify-center gap-3"
+          >
+            {loading ? '建單中…' : <>確認接單<span className="font-medium opacity-90 tabular-nums">${total.toLocaleString()}</span></>}
+          </button>
+        </div>
       </div>
     </div>
   )
 }
+
+/* ─── 樣式常數 ─── */
+const CARD = 'bg-white border border-slate-200 rounded-2xl shadow-sm p-4'
+const LABEL = 'text-sm font-semibold text-slate-500 mb-2'
+const INPUT = 'w-full h-11 border border-slate-300 rounded-xl px-3.5 text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+
+/* ─── 分段按鈕 ─── */
+function Segmented({ value, onChange, options, compact }: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+  compact?: boolean
+}) {
+  return (
+    <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+      {options.map(o => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`flex-1 ${compact ? 'h-9' : 'h-10'} rounded-lg text-sm font-medium transition ${value === o.value ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+        >{o.label}</button>
+      ))}
+    </div>
+  )
+}
+
+/* ─── Icons（inline SVG） ─── */
+type IP = { className?: string }
+const svg = (className: string | undefined, d: ReactNode) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+)
+const IconSearch = ({ className }: IP) => svg(className, <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>)
+const IconPlus = ({ className }: IP) => svg(className, <path d="M12 5v14M5 12h14" />)
+const IconMinus = ({ className }: IP) => svg(className, <path d="M5 12h14" />)
+const IconTrash = ({ className }: IP) => svg(className, <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></>)
+const IconChevron = ({ className }: IP) => svg(className, <path d="m6 9 6 6 6-6" />)
+const IconClipboard = ({ className }: IP) => svg(className, <><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4h6v3H9z" /></>)
