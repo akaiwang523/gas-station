@@ -876,7 +876,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             <div key={order.id} className={`relative bg-white border border-slate-200 border-l-4 rounded-2xl shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`} style={{ borderLeftColor: rowStatus.dot }}>
               {/* 主資訊：送貨員要看的只有「誰、哪裡、什麼、多少錢」，加上一顆「完成」 */}
               <div
-                className="p-4 lg:py-3 cursor-pointer flex flex-col lg:grid lg:items-center lg:gap-x-5 lg:gap-y-1"
+                className="px-4 py-3 lg:py-2.5 cursor-pointer flex flex-col lg:grid lg:items-center lg:gap-x-5"
                 style={{ gridTemplateColumns: 'minmax(220px,44fr) minmax(110px,18fr) minmax(110px,16fr) minmax(170px,22fr)' }}
                 onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
               >
@@ -892,16 +892,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                     />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5" style={{ background: rowStatus.bg, color: rowStatus.text }}>
-                        {rowStatus.label}{order.scheduled_date ? ` ${new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}` : ''}
-                      </span>
-                      {isRepeatCall(order) && (
-                        <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5 bg-red-500 text-white">再次來電</span>
-                      )}
-                      <SourceBadge source={order.source} />
-                    </div>
-                    <div className="flex items-center gap-1.5 min-w-0 mt-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate text-lg font-bold text-slate-900 leading-tight">{order.customer_name}</span>
                       {onEditCustomer && (
                         <button
@@ -911,6 +902,22 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                         </button>
+                      )}
+                      {/* 在「待派送」分頁裡，一般待派送單不用再標狀態；只標例外（已排定、配送中、再次來電、LINE） */}
+                      {!(order.status === 'PENDING' && !order.scheduled_date) && (
+                        <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5 flex-shrink-0" style={{ background: rowStatus.bg, color: rowStatus.text }}>
+                          {rowStatus.label}{order.scheduled_date ? ` ${new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}` : ''}
+                        </span>
+                      )}
+                      {isRepeatCall(order) && (
+                        <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5 bg-red-500 text-white flex-shrink-0">再次來電</span>
+                      )}
+                      <SourceBadge source={order.source} />
+                      {order.customer_phone && (
+                        <a href={`tel:${order.customer_phone}`} onClick={e => e.stopPropagation()}
+                          className="hidden lg:inline ml-1 text-[13px] text-slate-500 hover:text-blue-600 tabular-nums whitespace-nowrap">
+                          {order.customer_phone}
+                        </a>
                       )}
                     </div>
                     <a
@@ -927,17 +934,24 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       <a
                         href={`tel:${order.customer_phone}`}
                         onClick={e => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-[13px] text-slate-500 hover:text-blue-600 mt-0.5 tabular-nums"
+                        className="inline-flex lg:hidden items-center gap-1 text-[13px] text-slate-500 hover:text-blue-600 mt-0.5 tabular-nums"
                       >
                         <svg className="flex-shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                         {order.customer_phone}
                       </a>
                     )}
+                    {(order.note || returnsMap[order.customer_id]?.[0]) && (
+                      <div className="hidden lg:block truncate text-xs text-slate-500 mt-0.5">
+                        {order.note && <span className="text-slate-600">備註：{order.note}</span>}
+                        {order.note && returnsMap[order.customer_id]?.[0] && <span className="mx-2 text-slate-300">|</span>}
+                        {returnsMap[order.customer_id]?.[0] && <span className="text-amber-700">上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* 品項 + 金額（直向時合併成一個淡色區塊；橫向拆成兩欄） */}
-                <div className="flex justify-between items-center bg-slate-50 rounded-xl px-3 py-2.5 my-3 lg:contents">
+                <div className="flex justify-between items-center bg-slate-50 rounded-xl px-3 py-2 my-2.5 lg:contents">
                   <div className="text-xl lg:text-lg font-bold text-slate-900 min-w-0">
                     {order.items && order.items.length > 0
                       ? order.items.map((i: any, idx: number) => (
@@ -959,14 +973,14 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                 </div>
 
                 {/* 主要操作：完成（單一主按鈕），其他收進「更多」 */}
-                <div className="order-4 lg:order-none mt-3 lg:mt-0 flex flex-col items-stretch gap-1 lg:items-end" onClick={e => e.stopPropagation()}>
+                <div className="order-4 lg:order-none mt-3 lg:mt-0 flex items-stretch gap-2 lg:justify-end" onClick={e => e.stopPropagation()}>
                   {isFutureScheduled(order) ? (
-                    <div className="h-12 lg:h-11 lg:w-36 flex items-center justify-center bg-slate-50 text-slate-400 text-sm font-medium rounded-xl">未到配送日</div>
+                    <div className="flex-1 lg:flex-none h-12 lg:h-11 lg:w-32 flex items-center justify-center bg-slate-50 text-slate-400 text-sm font-medium rounded-xl">未到配送日</div>
                   ) : (
                     <button
                       onClick={() => markDelivered(order)}
                       disabled={actionId === order.id}
-                      className="h-12 lg:h-11 lg:w-36 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-300 text-white text-base font-bold rounded-xl transition"
+                      className="flex-1 lg:flex-none h-12 lg:h-11 lg:w-32 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-300 text-white text-base font-bold rounded-xl transition"
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                       {actionId === order.id ? '處理中…' : '完成'}
@@ -974,16 +988,16 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   )}
                   <button
                     onClick={() => toggleExpand(order)}
-                    className="h-8 lg:w-36 flex items-center justify-center gap-1 text-sm text-slate-500 hover:text-slate-800"
+                    title={expandedId === order.id ? '收合' : '更多'}
+                    className={`w-12 lg:w-11 h-12 lg:h-11 flex items-center justify-center rounded-xl border text-slate-500 hover:text-slate-800 flex-shrink-0 ${expandedId === order.id ? 'bg-slate-100 border-slate-300' : 'bg-white border-slate-200'}`}
                   >
-                    {expandedId === order.id ? '收合' : '更多'}
-                    <svg className={`transition ${expandedId === order.id ? 'rotate-180' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                   </button>
                 </div>
 
                 {/* 次要資訊：備註、存氣、上次配送、來電時間（直向） */}
-                {(order.note || returnsMap[order.customer_id]?.[0] || lastDelivery || order.call_time) && (
-                  <div className="order-3 lg:order-none lg:col-span-4 text-[13px] text-slate-500 space-y-0.5">
+                {(order.note || returnsMap[order.customer_id]?.[0] || order.call_time) && (
+                  <div className="order-3 lg:hidden text-[13px] text-slate-500 space-y-0.5">
                     {order.note && <div className="text-slate-700">備註：{order.note}</div>}
                     {returnsMap[order.customer_id]?.[0] && (
                       <div className="text-amber-700">
@@ -993,12 +1007,11 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                           : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''}
                       </div>
                     )}
-                    {(lastDelivery || order.call_time) && (
+                    {order.call_time && (
                       <div className="flex gap-3 flex-wrap text-slate-400">
                         {order.call_time && (
-                          <span className="lg:hidden">來電 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
+                          <span>來電 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
                         )}
-                        {lastDelivery && <span>上次配送 {daysAgoLabel(lastDelivery.created_at)}</span>}
                       </div>
                     )}
                   </div>
