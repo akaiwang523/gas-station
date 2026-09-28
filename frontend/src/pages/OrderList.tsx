@@ -49,6 +49,8 @@ const STATUS_BORDER: Record<string, string> = {
 const GAS_LABELS: Record<string, string> = {
   BOTTLED_20KG: '20kg', BOTTLED_16KG: '16kg', BOTTLED_10KG: '10kg', BOTTLED_4KG: '4kg',
 }
+// 基準價還沒載入或沒設定時的備用單價（與後端 fallback 一致）
+const FALLBACK_PRICE: Record<string, number> = { BOTTLED_20KG: 800, BOTTLED_16KG: 650, BOTTLED_10KG: 450, BOTTLED_4KG: 200 }
 // 橫向列（iPad landscape）專用狀態色票，跟設計稿的色碼對齊
 const ROW_STATUS_STYLE: Record<string, { dot: string; bg: string; text: string; label: string }> = {
   PENDING: { dot: '#F59E0B', bg: '#FEF3C7', text: '#92400E', label: '待派送' },
@@ -125,6 +127,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [editRememberPrice, setEditRememberPrice] = useState(false)
   const [editRememberPriceIndex, setEditRememberPriceIndex] = useState(0)
   const [editLoading, setEditLoading] = useState(false)
+  // 手動改過單價的品項（index），其餘品項的單價都由系統自動帶入
+  const [manualPriceIdx, setManualPriceIdx] = useState<Set<number>>(new Set())
   const [customerHistory, setCustomerHistory] = useState<Record<number, any>>({})
   // 待送分頁多選批次標記完成（處理「其實已經送完但忘記點完成」累積下來的舊單）
   const [selectMode, setSelectMode] = useState(false)
@@ -240,16 +244,17 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     setMoreSection(null)
     if (order.items && order.items.length > 0) {
       setEditItems(order.items.map((i: any) => ({
-        id: i.id, gasType: i.gas_type, quantity: String(i.quantity), unitPrice: String(i.unit_price),
+        id: i.id, gasType: i.gas_type, quantity: String(Number(i.quantity)), unitPrice: String(Number(i.unit_price)),
       })))
     } else {
       // 沒有品項明細的舊資料，退回用訂單主表的桶數/單價當作單一品項
-      setEditItems([{ id: 0, gasType: 'BOTTLED_20KG', quantity: String(order.quantity), unitPrice: String(order.unit_price) }])
+      setEditItems([{ id: 0, gasType: 'BOTTLED_20KG', quantity: String(Number(order.quantity)), unitPrice: String(Number(order.unit_price)) }])
     }
     setEditNote(order.note || '')
     setEditPaymentType(order.payment_type)
     setEditRememberPrice(false)
     setEditRememberPriceIndex(0)
+    setManualPriceIdx(new Set())
     // 若 load() 階段還沒撈到（例如已完成訂單），補撈一次
     if (!customerHistory[order.customer_id]) {
       try {
@@ -289,22 +294,65 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
     }
   }
   // 更新編輯中某個品項的某個欄位（新增、尚未存檔的品項，改規格時價格自動帶入該規格的目前基準價）
-  function updateEditItem(index: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string) {
+  // 自動單價：新增品項或換規格時不用手動填，依序採用
+  //   1. 同一張單裡已經有同規格的品項 → 用那一項的單價
+  //   2. 這位客戶上次叫同規格的單價
+  //   3. 目前的基準價
+  function autoPrice(order: Order | undefined, gasType: string, items: typeof editItems, skipIdx: number): { price: number; source: string } {
+    const same = items.find((it, i) => i !== skipIdx && it.gasType === gasType && Number(it.unitPrice) > 0)
+    if (same) return { price: Number(same.unitPrice), source: '同單' }
+    const last = order ? getLastUnitPrice(order, gasType) : null
+    if (last !== null) return { price: last, source: '上次價' }
+    return { price: baselinePrices[gasType] || FALLBACK_PRICE[gasType] || 0, source: '基準價' }
+  }
+  function priceSource(order: Order | undefined, idx: number): string {
+    const it = editItems[idx]
+    if (!it) return ''
+    const p = Number(it.unitPrice)
+    const last = order ? getLastUnitPrice(order, it.gasType) : null
+    if (last !== null && last === p) return '上次價'
+    if ((baselinePrices[it.gasType] || FALLBACK_PRICE[it.gasType]) === p) return '基準價'
+    return ''
+  }
+  function updateEditItem(index: number, field: 'gasType' | 'quantity' | 'unitPrice', value: string, order?: Order) {
     setEditItems(items => items.map((it, i) => {
       if (i !== index) return it
-      if (field === 'gasType' && it.id === 0) {
-        return { ...it, gasType: value, unitPrice: String(baselinePrices[value] || it.unitPrice || '') }
+      if (field === 'gasType') {
+        // 換規格時價格一定跟著換，除非這一項已經手動改過價
+        if (manualPriceIdx.has(index)) return { ...it, gasType: value }
+        const { price } = autoPrice(order, value, items, index)
+        return { ...it, gasType: value, unitPrice: price ? String(price) : it.unitPrice }
       }
       return { ...it, [field]: value }
     }))
   }
-  // 新增一個空白品項（預設 20kg，桶數 1，單價直接帶入目前的基準價，不用手動填）
-  function addEditItem() {
-    setEditItems(items => [...items, { id: 0, gasType: 'BOTTLED_20KG', quantity: '1', unitPrice: String(baselinePrices.BOTTLED_20KG || '') }])
+  // 新增品項：沿用最後一項的規格，單價自動帶入
+  function addEditItem(order?: Order) {
+    setEditItems(items => {
+      const gasType = items[items.length - 1]?.gasType || 'BOTTLED_20KG'
+      const { price } = autoPrice(order, gasType, items, -1)
+      return [...items, { id: 0, gasType, quantity: '1', unitPrice: price ? String(price) : '' }]
+    })
   }
   // 移除一個品項（至少保留一個，不能刪到完全沒有品項）
   function removeEditItem(index: number) {
     setEditItems(items => items.length <= 1 ? items : items.filter((_, i) => i !== index))
+    setManualPriceIdx(new Set())
+  }
+  function toggleManualPrice(index: number, order?: Order) {
+    setManualPriceIdx(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) {
+        next.delete(index)
+        // 恢復自動：重新套用自動單價
+        setEditItems(items => items.map((it, i) => {
+          if (i !== index) return it
+          const { price } = autoPrice(order, it.gasType, items, index)
+          return price ? { ...it, unitPrice: String(price) } : it
+        }))
+      } else next.add(index)
+      return next
+    })
   }
   // 編輯區目前所有品項的合計金額
   function editItemsTotal() {
@@ -998,7 +1046,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                               <select
                                 className="w-full h-10 border border-slate-300 rounded-lg px-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
                                 value={item.gasType}
-                                onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                                onChange={e => updateEditItem(idx, 'gasType', e.target.value, order)}
                               >
                                 {Object.entries(GAS_LABELS).map(([val, label]) => (
                                   <option key={val} value={val}>{label}</option>
@@ -1011,23 +1059,23 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                                 value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400 mb-0.5">
+                              <div className="flex items-center gap-2 text-xs text-slate-400 mb-0.5">
                                 <span>單價</span>
                                 <button
                                   type="button"
-                                  onClick={() => updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice))}
+                                  onClick={() => toggleManualPrice(idx, order)}
                                   className="text-blue-600 hover:text-blue-800 px-1.5 py-1 -my-1 rounded"
-                                >套用基準價</button>
-                                {getLastUnitPrice(order, item.gasType) !== null && (
-                                  <button
-                                    type="button"
-                                    onClick={() => updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType)))}
-                                    className="text-blue-600 hover:text-blue-800 px-1.5 py-1 -my-1 rounded"
-                                  >套用上次價 ${getLastUnitPrice(order, item.gasType)}</button>
-                                )}
+                                >{manualPriceIdx.has(idx) ? '恢復自動' : '改價'}</button>
                               </div>
-                              <input type="number" className="w-full h-10 border border-slate-300 rounded-lg px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                                value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                              {manualPriceIdx.has(idx) ? (
+                                <input type="number" inputMode="numeric" autoFocus className="w-full h-10 border border-slate-300 rounded-lg px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                  value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                              ) : (
+                                <div className="h-10 flex items-center gap-2 text-base text-slate-800 tabular-nums">
+                                  ${Number(item.unitPrice || 0).toLocaleString()}
+                                  {priceSource(order, idx) && <span className="text-xs text-slate-400">{priceSource(order, idx)}</span>}
+                                </div>
+                              )}
                             </div>
                             <div className="h-10 flex items-center text-sm text-slate-600 w-16 justify-end flex-shrink-0 tabular-nums">
                               ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
@@ -1043,7 +1091,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                           </div>
                         ))}
                         <div className="flex items-center justify-between">
-                          <button onClick={addEditItem} className="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">＋ 新增品項</button>
+                          <button onClick={() => addEditItem(order)} className="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">＋ 新增品項</button>
                           <span className="text-sm text-slate-600">合計 <span className="font-bold tabular-nums">${editItemsTotal().toLocaleString()}</span></span>
                         </div>
                         {editItems.length > 0 && (
@@ -1152,7 +1200,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         <select
                           className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
                           value={item.gasType}
-                          onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                          onChange={e => updateEditItem(idx, 'gasType', e.target.value, order)}
                         >
                           {Object.entries(GAS_LABELS).map(([val, label]) => (
                             <option key={val} value={val}>{label}</option>
@@ -1196,7 +1244,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       </div>
                     ))}
                     <button
-                      onClick={addEditItem}
+                      onClick={() => addEditItem(order)}
                       className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
                     >＋ 新增品項（不同規格）</button>
                   </div>
