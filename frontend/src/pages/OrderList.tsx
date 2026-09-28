@@ -28,7 +28,7 @@ function SourceBadge({ source }: { source: string | null | undefined }) {
       className="text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap flex-shrink-0"
       style={{ background: '#DCFCE7', color: '#15803D' }}
       title="LINE 官方帳號預訂"
-    >💬 LINE</span>
+    >LINE</span>
   )
 }
 const STATUS_LABEL: Record<string, string> = {
@@ -117,6 +117,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [returnLoading, setReturnLoading] = useState(false)
   // 展開編輯（多品項：每個品項各自一行）
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  // 「更多」展開後，裡面哪一個收合區塊是打開的（歷史紀錄／修改品項），一次只開一個
+  const [moreSection, setMoreSection] = useState<'history' | 'edit' | null>(null)
   const [editItems, setEditItems] = useState<{ id: number; gasType: string; quantity: string; unitPrice: string }[]>([])
   const [editNote, setEditNote] = useState('')
   const [editPaymentType, setEditPaymentType] = useState('CASH')
@@ -235,6 +237,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   async function toggleExpand(order: Order) {
     if (expandedId === order.id) { setExpandedId(null); return }
     setExpandedId(order.id)
+    setMoreSection(null)
     if (order.items && order.items.length > 0) {
       setEditItems(order.items.map((i: any) => ({
         id: i.id, gasType: i.gas_type, quantity: String(i.quantity), unitPrice: String(i.unit_price),
@@ -822,141 +825,43 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             const lastDelivery = getLastDelivery(order)
             const rowStatus = isFutureScheduled(order) ? ROW_SCHEDULED_STYLE : (ROW_STATUS_STYLE[order.status] || ROW_STATUS_STYLE.PENDING)
             return (
-            <div key={order.id} className={`relative bg-white border border-gray-200 border-l-4 rounded-xl p-4 lg:py-2.5 lg:px-4 lg:min-h-[76px] shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`} style={{ borderLeftColor: rowStatus.dot }}>
-              {/* 卡片主體（直向/窄螢幕）- 點擊展開（多選模式下改成點擊勾選） */}
-              <div className="lg:hidden cursor-pointer" onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}>
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    {selectMode && (
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(order.id)}
-                        onChange={() => toggleSelectOrder(order.id)}
-                        onClick={e => e.stopPropagation()}
-                        className="w-5 h-5 mt-0.5 accent-orange-500 flex-shrink-0"
-                      />
-                    )}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-gray-800 text-lg">{order.customer_name}</span>
-                        <SourceBadge source={order.source} />
-                        {onEditCustomer && (
-                          <button
-                            onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                            className="text-xs text-blue-500"
-                            title="編輯客戶資料"
-                          >✏️</button>
-                        )}
-                      </div>
-                      <a
-                        href={mapsUrl(order.customer_address)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        className="flex items-center gap-1 text-sm text-gray-600 hover:text-blue-600 mt-0.5"
-                      >
-                        <span>📍</span>
-                        <span className="truncate">{order.customer_address}</span>
-                      </a>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    {order.scheduled_date && (
-                      <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-100 text-purple-700 whitespace-nowrap">
-                        📅 {new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
-                      </span>
-                    )}
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[order.status]}`}>{STATUS_LABEL[order.status]}</span>
-                    {isRepeatCall(order) && (
-                      <span className="text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap bg-red-500 text-white">
-                        再次來電
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 重點區塊：品項/桶數 + 金額/付款方式，用色塊圈起來、字放大，這是司機真正要看的東西 */}
-                <div className="flex justify-between items-center bg-gray-50 rounded-xl px-3 py-2.5 my-2.5">
-                  <div className="text-xl font-bold text-gray-800">
-                    {order.items && order.items.length > 0 ? (
-                      <span>{order.items.map((i: any) => `${GAS_LABELS[i.gas_type]}×${i.quantity}`).join(' + ')}</span>
-                    ) : (
-                      <span>{order.quantity} 桶</span>
-                    )}
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-xl font-bold text-gray-800">${Number(order.total_amount).toLocaleString()}</div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${order.payment_type === 'AR' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
-                      {order.payment_type === 'AR' ? '📒 欠帳' : '💵 現金'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 次要資訊：來電時間、上次配送、備註、存氣，縮小集中放這裡，需要時看得到、平常不搶注意力 */}
-                {(order.call_time || lastDelivery || order.note || returnsMap[order.customer_id]?.[0]) && (
-                  <div className="text-xs text-gray-400 space-y-0.5">
-                    {(order.call_time || lastDelivery) && (
-                      <div className="flex gap-2 flex-wrap">
-                        {order.call_time && <span>📞 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>}
-                        {lastDelivery && <span>🕓 上次配送 {daysAgoLabel(lastDelivery.created_at)}</span>}
-                      </div>
-                    )}
-                    {order.note && <div className="text-orange-500">📝 {order.note}</div>}
-                    {returnsMap[order.customer_id]?.[0] && (
-                      <div>
-                        *上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg
-                        {Number(returnsMap[order.customer_id][0].amount) > 0
-                          ? `（${returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} $${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}）`
-                          : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''
-                        }
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="text-right text-xs text-gray-300 mt-1">{expandedId === order.id ? '收合 ▲' : '詳情 ▾'}</div>
-              </div>
-              {/* 卡片主體（橫向/寬螢幕，如 iPad 橫放）- 單行呈現 */}
+            <div key={order.id} className={`relative bg-white border border-slate-200 border-l-4 rounded-2xl shadow-sm ${selectMode && selectedIds.has(order.id) ? 'ring-2 ring-orange-400' : ''}`} style={{ borderLeftColor: rowStatus.dot }}>
+              {/* 主資訊：送貨員要看的只有「誰、哪裡、什麼、多少錢」，加上一顆「完成」 */}
               <div
-                className="hidden lg:grid items-center gap-4 cursor-pointer"
-                style={{ gridTemplateColumns: 'minmax(200px,40fr) minmax(100px,18fr) minmax(90px,16fr) minmax(150px,26fr)' }}
+                className="p-4 lg:py-3 cursor-pointer flex flex-col lg:grid lg:items-center lg:gap-x-5 lg:gap-y-1"
+                style={{ gridTemplateColumns: 'minmax(220px,44fr) minmax(110px,18fr) minmax(110px,16fr) minmax(170px,22fr)' }}
                 onClick={() => selectMode ? toggleSelectOrder(order.id) : toggleExpand(order)}
               >
-                {/* 第一欄 40%：狀態、客戶姓名、地址、下單時間 */}
-                <div className="min-w-0 flex items-start gap-2">
+                {/* 客戶／地址／電話 */}
+                <div className="min-w-0 flex items-start gap-2.5">
                   {selectMode && (
                     <input
                       type="checkbox"
                       checked={selectedIds.has(order.id)}
                       onChange={() => toggleSelectOrder(order.id)}
                       onClick={e => e.stopPropagation()}
-                      className="w-5 h-5 mt-0.5 accent-orange-500 flex-shrink-0"
+                      className="w-5 h-5 mt-1 accent-orange-500 flex-shrink-0"
                     />
                   )}
-                  <div className="min-w-0">
-                    <span
-                      className="inline-block mb-1 rounded-full font-medium whitespace-nowrap"
-                      style={{ background: rowStatus.bg, color: rowStatus.text, fontSize: 11, padding: '2px 8px' }}
-                    >
-                      {rowStatus.label}
-                    </span>
-                    {isRepeatCall(order) && (
-                      <span
-                        className="inline-block mb-1 ml-1 rounded-full font-medium whitespace-nowrap bg-red-500 text-white"
-                        style={{ fontSize: 11, padding: '2px 8px' }}
-                      >
-                        再次來電
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5" style={{ background: rowStatus.bg, color: rowStatus.text }}>
+                        {rowStatus.label}{order.scheduled_date ? ` ${new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}` : ''}
                       </span>
-                    )}
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="truncate" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>{order.customer_name}</span>
+                      {isRepeatCall(order) && (
+                        <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5 bg-red-500 text-white">再次來電</span>
+                      )}
                       <SourceBadge source={order.source} />
+                    </div>
+                    <div className="flex items-center gap-1.5 min-w-0 mt-1">
+                      <span className="truncate text-lg font-bold text-slate-900 leading-tight">{order.customer_name}</span>
                       {onEditCustomer && (
                         <button
                           onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
-                          className="text-gray-400 hover:text-blue-500 flex-shrink-0"
+                          className="text-slate-400 hover:text-blue-600 flex-shrink-0 p-1 -m-1"
                           title="編輯客戶資料"
                         >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                         </button>
                       )}
                     </div>
@@ -965,248 +870,239 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      className="flex items-center gap-1 hover:text-blue-600 min-w-0"
-                      style={{ fontSize: 13, color: '#4B5563' }}
+                      className="flex items-center gap-1 text-[15px] text-slate-700 hover:text-blue-600 min-w-0 mt-0.5"
                     >
-                      <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                      <span className="whitespace-nowrap overflow-hidden text-ellipsis">{order.customer_address}</span>
+                      <svg className="flex-shrink-0 text-slate-400" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                      <span className="truncate">{order.customer_address}</span>
                     </a>
-                    {lastDelivery && (
-                      <div style={{ fontSize: 12, color: '#6B7280' }}>上次 {daysAgoLabel(lastDelivery.created_at)}</div>
+                    {order.customer_phone && (
+                      <a
+                        href={`tel:${order.customer_phone}`}
+                        onClick={e => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-[13px] text-slate-500 hover:text-blue-600 mt-0.5 tabular-nums"
+                      >
+                        <svg className="flex-shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                        {order.customer_phone}
+                      </a>
                     )}
                   </div>
                 </div>
-                {/* 第二欄 18%：品項，依序由上往下排列 */}
-                <div className="min-w-0" style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                  {order.items && order.items.length > 0
-                    ? order.items.map((i: any, idx: number) => (
-                        <div key={idx} className="whitespace-nowrap overflow-hidden text-ellipsis">{GAS_LABELS[i.gas_type]}×{i.quantity}</div>
-                      ))
-                    : <div className="whitespace-nowrap">{order.quantity} 桶</div>}
-                </div>
-                {/* 第三欄 16%：金額、付款方式、時間 */}
-                <div className="min-w-0">
-                  <div className="whitespace-nowrap" style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>${Number(order.total_amount).toLocaleString()}</div>
-                  <div className="flex items-center gap-1 whitespace-nowrap" style={{ fontSize: 12, color: '#6B7280' }}>
-                    <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/></svg>
-                    {order.payment_type === 'AR' ? '欠帳' : '現金'}
+
+                {/* 品項 + 金額（直向時合併成一個淡色區塊；橫向拆成兩欄） */}
+                <div className="flex justify-between items-center bg-slate-50 rounded-xl px-3 py-2.5 my-3 lg:contents">
+                  <div className="text-xl lg:text-lg font-bold text-slate-900 min-w-0">
+                    {order.items && order.items.length > 0
+                      ? order.items.map((i: any, idx: number) => (
+                          <div key={idx} className="whitespace-nowrap">{GAS_LABELS[i.gas_type] || i.gas_type} × {i.quantity}</div>
+                        ))
+                      : <div className="whitespace-nowrap">{order.quantity} 桶</div>}
                   </div>
-                  <div className="flex items-center gap-1 whitespace-nowrap" style={{ fontSize: 12, color: '#6B7280' }}>
-                    <svg className="flex-shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-                    {order.call_time
-                      ? new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })
-                      : (order.scheduled_date ? new Date(order.scheduled_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' }) : '—')}
-                  </div>
-                </div>
-                {/* 第四欄 26%：操作按鈕，固定寬度、靠右對齊 */}
-                <div className="min-w-0 flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
-                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <>
-                      <button onClick={() => markDelivering(order.id)} disabled={actionId === order.id}
-                        style={{ width: 104 }}
-                        className="h-9 flex items-center justify-center gap-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="15" height="10" rx="1"/><path d="M16 10h4l3 3v4h-7z"/><circle cx="6" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>
-                        開始配送
-                      </button>
-                      <button onClick={() => cancelOrder(order)} disabled={actionId === order.id}
-                        className="h-9 px-3 flex items-center justify-center border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200 disabled:opacity-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
-                        取消
-                      </button>
-                      <button onClick={() => toggleExpand(order)} className="w-7 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 flex-shrink-0" title="更多">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
-                      </button>
-                    </>
-                  )}
-                  {order.status === 'PENDING' && isFutureScheduled(order) && (
-                    <div style={{ width: 104 }} className="h-9 flex items-center justify-center bg-gray-50 text-gray-400 text-xs font-medium rounded-lg whitespace-nowrap">未到配送日</div>
-                  )}
-                  {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                    <div className="flex flex-col gap-1.5">
-                      {order.customer_phone && (
-                        <a href={`tel:${order.customer_phone}`} onClick={e => e.stopPropagation()}
-                          style={{ width: 104 }}
-                          className="h-8 flex items-center justify-center gap-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                          聯絡客戶
-                        </a>
-                      )}
-                      <button onClick={() => markDelivered(order)} disabled={actionId === order.id}
-                        style={{ width: 104 }}
-                        className="h-8 flex items-center justify-center gap-1.5 border border-blue-500 text-blue-600 hover:bg-blue-50 disabled:opacity-50 text-xs font-medium rounded-lg transition whitespace-nowrap">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                        完成配送
-                      </button>
+                  <div className="text-right lg:text-left flex-shrink-0">
+                    <div className="text-xl lg:text-lg font-bold text-slate-900 tabular-nums">${Number(order.total_amount).toLocaleString()}</div>
+                    <div className={`text-sm font-medium ${order.payment_type === 'AR' ? 'text-red-600' : 'text-slate-500'}`}>
+                      {order.payment_type === 'AR' ? '記帳' : '現金'}
                     </div>
-                  )}
+                    {order.call_time && (
+                      <div className="hidden lg:block text-xs text-slate-400 tabular-nums">
+                        來電 {new Date(order.call_time).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {/* 主要操作：完成（單一主按鈕），其他收進「更多」 */}
+                <div className="order-4 lg:order-none mt-3 lg:mt-0 flex flex-col items-stretch gap-1 lg:items-end" onClick={e => e.stopPropagation()}>
+                  {isFutureScheduled(order) ? (
+                    <div className="h-12 lg:h-11 lg:w-36 flex items-center justify-center bg-slate-50 text-slate-400 text-sm font-medium rounded-xl">未到配送日</div>
+                  ) : (
+                    <button
+                      onClick={() => markDelivered(order)}
+                      disabled={actionId === order.id}
+                      className="h-12 lg:h-11 lg:w-36 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-300 text-white text-base font-bold rounded-xl transition"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                      {actionId === order.id ? '處理中…' : '完成'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => toggleExpand(order)}
+                    className="h-8 lg:w-36 flex items-center justify-center gap-1 text-sm text-slate-500 hover:text-slate-800"
+                  >
+                    {expandedId === order.id ? '收合' : '更多'}
+                    <svg className={`transition ${expandedId === order.id ? 'rotate-180' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                </div>
+
+                {/* 次要資訊：備註、存氣、上次配送、來電時間（直向） */}
+                {(order.note || returnsMap[order.customer_id]?.[0] || lastDelivery || order.call_time) && (
+                  <div className="order-3 lg:order-none lg:col-span-4 text-[13px] text-slate-500 space-y-0.5">
+                    {order.note && <div className="text-slate-700">備註：{order.note}</div>}
+                    {returnsMap[order.customer_id]?.[0] && (
+                      <div className="text-amber-700">
+                        上次存氣 {returnsMap[order.customer_id][0].remaining_kg}kg
+                        {Number(returnsMap[order.customer_id][0].amount) > 0
+                          ? `（${returnsMap[order.customer_id][0].action === 'REFUND' ? '退費' : '抵扣'} $${Number(returnsMap[order.customer_id][0].amount).toLocaleString()}）`
+                          : returnsMap[order.customer_id][0].action === 'RECORD' ? '（只記錄）' : ''}
+                      </div>
+                    )}
+                    {(lastDelivery || order.call_time) && (
+                      <div className="flex gap-3 flex-wrap text-slate-400">
+                        {order.call_time && (
+                          <span className="lg:hidden">來電 {new Date(order.call_time).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
+                        )}
+                        {lastDelivery && <span>上次配送 {daysAgoLabel(lastDelivery.created_at)}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {/* 展開區塊 */}
-              {expandedId === order.id && (
-                <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
-                  {/* 上次叫貨 */}
-                  {customerHistory[order.customer_id]?.filter((h: any) => h.id !== order.id).length > 0 && (
-                    <div className="bg-blue-50 rounded-lg p-2.5 space-y-1">
-                      <div className="text-xs font-medium text-blue-700">📅 上次叫貨</div>
-                      {customerHistory[order.customer_id].filter((h: any) => h.id !== order.id).slice(0, 3).map((h: any) => (
-                        <div key={h.id} className="flex justify-between text-xs text-blue-600">
-                          <span>{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
-                          <span>{h.items?.length > 0 ? h.items.map((i: any) => `${GAS_LABELS[i.gas_type] || i.gas_type}×${i.quantity}`).join('+') : `${h.quantity}桶`}</span>
-                          <span>${Number(h.total_amount).toLocaleString()}</span>
+
+              {/* 更多：管理／編輯功能，預設收合 */}
+              {expandedId === order.id && (() => {
+                const history = (customerHistory[order.customer_id] || []).filter((h: any) => h.id !== order.id)
+                return (
+                <div className="border-t border-slate-100 px-4 pb-4 pt-2" onClick={e => e.stopPropagation()}>
+                  {/* 歷史叫貨紀錄 */}
+                  {history.length > 0 && (
+                    <div className="border-b border-slate-100">
+                      <button onClick={() => setMoreSection(s => s === 'history' ? null : 'history')} className="w-full h-11 flex items-center justify-between text-sm text-slate-700">
+                        <span>歷史叫貨紀錄（{Math.min(history.length, 3)} 筆）</span>
+                        <svg className={`text-slate-400 transition ${moreSection === 'history' ? 'rotate-180' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                      </button>
+                      {moreSection === 'history' && (
+                        <div className="pb-3 space-y-1">
+                          {history.slice(0, 3).map((h: any) => (
+                            <div key={h.id} className="grid grid-cols-3 text-sm text-slate-600 tabular-nums">
+                              <span>{new Date(h.created_at).toLocaleDateString('zh-TW')}</span>
+                              <span>{h.items?.length > 0 ? h.items.map((i: any) => `${GAS_LABELS[i.gas_type] || i.gas_type}×${i.quantity}`).join('+') : `${h.quantity}桶`}</span>
+                              <span className="text-right">${Number(h.total_amount).toLocaleString()}</span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
-                  {/* 編輯欄位：每個品項各自一行，可新增/刪除/改規格 */}
-                  <div className="space-y-2">
-                    {editItems.map((item, idx) => (
-                      <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
-                        <select
-                          className="w-20 flex-shrink-0 border border-gray-300 rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
-                          value={item.gasType}
-                          onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {Object.entries(GAS_LABELS).map(([val, label]) => (
-                            <option key={val} value={val}>{label}</option>
-                          ))}
-                        </select>
-                        <div className="flex-1">
-                          <label className="block text-xs text-gray-400 mb-0.5">桶數</label>
-                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                            value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} onClick={e => e.stopPropagation()} />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap text-xs text-gray-400 mb-0.5">
-                            <span>單價</span>
+
+                  {/* 修改品項與價格 */}
+                  <div className="border-b border-slate-100">
+                    <button onClick={() => setMoreSection(s => s === 'edit' ? null : 'edit')} className="w-full h-11 flex items-center justify-between text-sm text-slate-700">
+                      <span>修改品項、價格、備註、付款方式</span>
+                      <svg className={`text-slate-400 transition ${moreSection === 'edit' ? 'rotate-180' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    {moreSection === 'edit' && (
+                      <div className="pb-4 space-y-3">
+                        {editItems.map((item, idx) => (
+                          <div key={item.id || `new-${idx}`} className="flex items-end gap-2">
+                            <div className="w-20 flex-shrink-0">
+                              <label className="block text-xs text-slate-400 mb-0.5">規格</label>
+                              <select
+                                className="w-full h-10 border border-slate-300 rounded-lg px-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                value={item.gasType}
+                                onChange={e => updateEditItem(idx, 'gasType', e.target.value)}
+                              >
+                                {Object.entries(GAS_LABELS).map(([val, label]) => (
+                                  <option key={val} value={val}>{label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="w-20">
+                              <label className="block text-xs text-slate-400 mb-0.5">桶數</label>
+                              <input type="number" className="w-full h-10 border border-slate-300 rounded-lg px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                value={item.quantity} onChange={e => updateEditItem(idx, 'quantity', e.target.value)} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400 mb-0.5">
+                                <span>單價</span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice))}
+                                  className="text-blue-600 hover:text-blue-800 px-1.5 py-1 -my-1 rounded"
+                                >套用基準價</button>
+                                {getLastUnitPrice(order, item.gasType) !== null && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType)))}
+                                    className="text-blue-600 hover:text-blue-800 px-1.5 py-1 -my-1 rounded"
+                                  >套用上次價 ${getLastUnitPrice(order, item.gasType)}</button>
+                                )}
+                              </div>
+                              <input type="number" className="w-full h-10 border border-slate-300 rounded-lg px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} />
+                            </div>
+                            <div className="h-10 flex items-center text-sm text-slate-600 w-16 justify-end flex-shrink-0 tabular-nums">
+                              ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
+                            </div>
                             <button
-                              type="button"
-                              onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(baselinePrices[item.gasType] ?? item.unitPrice)) }}
-                              className="text-blue-500 hover:text-blue-700 font-normal px-1.5 py-1 -my-1 rounded"
-                              title="套用目前基準價"
-                            >套用基準價</button>
-                            {getLastUnitPrice(order, item.gasType) !== null && (
-                              <button
-                                type="button"
-                                onClick={e => { e.stopPropagation(); updateEditItem(idx, 'unitPrice', String(getLastUnitPrice(order, item.gasType))) }}
-                                className="text-green-600 hover:text-green-800 font-normal px-1.5 py-1 -my-1 rounded"
-                                title="套用這位客戶上次同規格的單價"
-                              >套用上次價 ${getLastUnitPrice(order, item.gasType)}</button>
+                              onClick={() => removeEditItem(idx)}
+                              disabled={editItems.length <= 1}
+                              className="h-10 w-8 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:text-slate-200 flex-shrink-0"
+                              title="刪除此品項"
+                            >
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between">
+                          <button onClick={addEditItem} className="h-9 px-3 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">＋ 新增品項</button>
+                          <span className="text-sm text-slate-600">合計 <span className="font-bold tabular-nums">${editItemsTotal().toLocaleString()}</span></span>
+                        </div>
+                        {editItems.length > 0 && (
+                          <div className="text-sm text-slate-600 space-y-1">
+                            <label className="flex items-center gap-2">
+                              <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={editRememberPrice} onChange={e => setEditRememberPrice(e.target.checked)} />
+                              記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
+                            </label>
+                            {editRememberPrice && new Set(editItems.map(i => Number(i.unitPrice) || 0)).size > 1 && (
+                              <div className="flex items-center gap-2 pl-6">
+                                <span>品項單價不同，記住哪一個：</span>
+                                <select className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white" value={editRememberPriceIndex} onChange={e => setEditRememberPriceIndex(Number(e.target.value))}>
+                                  {editItems.map((it, idx) => (
+                                    <option key={idx} value={idx}>{GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}</option>
+                                  ))}
+                                </select>
+                              </div>
                             )}
                           </div>
-                          <input type="number" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                            value={item.unitPrice} onChange={e => updateEditItem(idx, 'unitPrice', e.target.value)} onClick={e => e.stopPropagation()} />
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-slate-400 mb-0.5">備註</label>
+                            <input className="w-full h-10 border border-slate-300 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                              value={editNote} onChange={e => setEditNote(e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-400 mb-0.5">付款方式</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {[['CASH', '現金'], ['AR', '記帳']].map(([val, label]) => (
+                                <button
+                                  key={val}
+                                  onClick={() => setEditPaymentType(val)}
+                                  className={`h-10 rounded-lg text-sm font-medium border ${editPaymentType === val ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-600'}`}
+                                >{label}</button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 w-16 text-right flex-shrink-0">
-                          ${(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toLocaleString()}
-                        </div>
-                        <button
-                          onClick={e => { e.stopPropagation(); removeEditItem(idx) }}
-                          disabled={editItems.length <= 1}
-                          className="text-red-400 hover:text-red-600 disabled:text-gray-200 text-sm flex-shrink-0 w-5"
-                          title="刪除此品項"
-                        >
-                          ✕
+                        <button onClick={() => saveEdit(order)} disabled={editLoading}
+                          className="w-full h-10 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white text-sm font-medium rounded-lg">
+                          {editLoading ? '儲存中…' : '儲存修改'}
                         </button>
                       </div>
-                    ))}
-                    <button
-                      onClick={e => { e.stopPropagation(); addEditItem() }}
-                      className="w-full border border-dashed border-orange-300 text-orange-500 text-xs font-medium py-1.5 rounded-lg hover:bg-orange-50 transition"
-                    >
-                      ＋ 新增品項（不同規格）
-                    </button>
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">合計：${editItemsTotal().toLocaleString()}</label>
+
+                  {/* 低頻操作 */}
+                  <div className="flex items-center justify-end gap-4 pt-3">
+                    {order.status === 'PENDING' && !isFutureScheduled(order) && (
+                      <button onClick={() => postponeToTomorrow(order)} disabled={actionId === order.id}
+                        className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-50 py-1">延到明天</button>
+                    )}
+                    <button onClick={() => cancelOrder(order)} disabled={actionId === order.id}
+                      className="text-sm text-slate-400 hover:text-red-600 disabled:opacity-50 py-1">取消此筆訂單</button>
                   </div>
-                  {editItems.length > 0 && (
-                    <div className="text-xs text-gray-600 space-y-1" onClick={e => e.stopPropagation()}>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 accent-orange-500"
-                          checked={editRememberPrice}
-                          onChange={e => setEditRememberPrice(e.target.checked)}
-                        />
-                        🔒 記住這個單價（存成 {order.customer_name} 的特殊單價，以後自動帶入）
-                      </label>
-                      {editRememberPrice && new Set(editItems.map(i => Number(i.unitPrice) || 0)).size > 1 && (
-                        <div className="flex items-center gap-2 pl-6">
-                          <span>品項單價不同，記住哪一個：</span>
-                          <select
-                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs"
-                            value={editRememberPriceIndex}
-                            onChange={e => setEditRememberPriceIndex(Number(e.target.value))}
-                          >
-                            {editItems.map((it, idx) => (
-                              <option key={idx} value={idx}>
-                                {GAS_LABELS[it.gasType] || it.gasType} — ${it.unitPrice}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">備註</label>
-                    <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      value={editNote} onChange={e => setEditNote(e.target.value)} onClick={e => e.stopPropagation()} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">付款方式</label>
-                    <div className="flex gap-2">
-                      {[['CASH', '💵 現金'], ['AR', '📒 欠帳']].map(([val, label]) => (
-                        <button
-                          key={val}
-                          onClick={e => { e.stopPropagation(); setEditPaymentType(val) }}
-                          className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition ${editPaymentType === val ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600'}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <button onClick={e => { e.stopPropagation(); saveEdit(order) }} disabled={editLoading}
-                    className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white text-sm font-medium py-2 rounded-lg transition">
-                    {editLoading ? '儲存中...' : '💾 儲存修改'}
-                  </button>
-                  {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                    <button onClick={e => { e.stopPropagation(); postponeToTomorrow(order) }} disabled={actionId === order.id}
-                      className="w-full border border-purple-300 text-purple-600 hover:bg-purple-50 disabled:opacity-50 text-sm font-medium py-2 rounded-lg transition">
-                      📅 延到明天
-                    </button>
-                  )}
-                  <button onClick={e => { e.stopPropagation(); cancelOrder(order) }} disabled={actionId === order.id}
-                    className="hidden lg:block w-full text-center text-sm text-gray-400 hover:text-red-500 py-1.5">
-                    取消此筆訂單
-                  </button>
                 </div>
-              )}
-              {/* 操作按鈕（僅直向卡片使用，橫向已內嵌於單行列） */}
-              <div className="lg:hidden flex gap-2 mt-3">
-                <button onClick={e => { e.stopPropagation(); cancelOrder(order) }} disabled={actionId === order.id}
-                  className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-sm font-medium py-2 rounded-lg transition">
-                  取消
-                </button>
-                {order.status === 'PENDING' && !isFutureScheduled(order) && (
-                  <button onClick={e => { e.stopPropagation(); markDelivering(order.id) }} disabled={actionId === order.id}
-                    className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
-                    🚛 開始配送
-                  </button>
-                )}
-                {order.status === 'PENDING' && isFutureScheduled(order) && (
-                  <div className="flex-1 bg-gray-50 text-gray-400 text-sm font-medium py-2 rounded-lg text-center">
-                    ⏳ 尚未到配送日
-                  </div>
-                )}
-                {(order.status === 'DELIVERING' || order.status === 'ASSIGNED') && (
-                  <button onClick={e => { e.stopPropagation(); markDelivered(order) }} disabled={actionId === order.id}
-                    className="flex-1 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white text-sm font-medium py-2 rounded-lg transition">
-                    ✅ 完成送達
-                  </button>
-                )}
-              </div>
+                )
+              })()}
             </div>
             )
           })}
