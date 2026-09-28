@@ -214,11 +214,32 @@ export async function hardDeleteCustomer(req: Request, res: Response) {
   const id = Number(req.params.id)
   const [orders] = await db.query('SELECT COUNT(*) as cnt FROM orders WHERE customer_id = ?', [id]) as any
   if (orders[0].cnt > 0) {
-    return res.status(400).json({ error: `此客戶有 ${orders[0].cnt} 筆訂單記錄，無法刪除。請改用停用。` })
+    return res.status(400).json({ error: `此客戶有 ${orders[0].cnt} 筆訂單記錄，無法刪除。\n\n要刪除的話：到「報表 → 訂單查詢」搜尋這位客戶，全選刪除訂單後再回來刪除客戶。\n只是不想再看到的話，建議改用「停用」（保留電話，之後打來還認得）。` })
   }
   await db.query('DELETE FROM ar_balances WHERE customer_id = ?', [id])
   await db.query('DELETE FROM gas_returns WHERE customer_id = ?', [id])
-  await db.query('DELETE FROM customers WHERE id = ?', [id])
+  // 其他掛在這位客戶身上的附屬資料：先清掉／解除關聯，避免外鍵擋住刪除。
+  // 各表不一定都有 customer_id 欄位或外鍵，個別失敗就略過
+  const cleanup = [
+    'DELETE FROM line_users WHERE customer_id = ?',
+    'DELETE FROM customer_fixed_items WHERE customer_id = ?',
+    'DELETE FROM customer_phones WHERE customer_id = ?',
+    'DELETE FROM customer_events WHERE customer_id = ?',
+    'DELETE FROM prediction_history WHERE customer_id = ?',
+    'DELETE FROM prediction_dismissals WHERE customer_id = ?',
+    'DELETE FROM repeat_call_events WHERE customer_id = ?',
+    'UPDATE line_inquiries SET customer_id = NULL WHERE customer_id = ?',
+    'UPDATE unknown_calls SET customer_id = NULL WHERE customer_id = ?',
+  ]
+  for (const sql of cleanup) {
+    try { await db.query(sql, [id]) } catch { /* 表或欄位不存在就略過 */ }
+  }
+  try {
+    await db.query('DELETE FROM customers WHERE id = ?', [id])
+  } catch (err: any) {
+    console.error('[hardDeleteCustomer]', id, err)
+    return res.status(400).json({ error: '這位客戶還有其他資料關聯，無法刪除，請改用停用。' })
+  }
   res.json({ ok: true })
 }
 

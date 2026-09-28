@@ -480,3 +480,54 @@ export async function updateOrder(req: Request, res: Response) {
     conn.release()
   }
 }
+
+// POST /api/orders/bulk-delete { orderIds } — 訂單查詢頁「全選 → 刪除」
+// 規則（每筆各自在 transaction 裡處理，一筆失敗不影響其他筆）：
+// - 已取消：直接刪
+// - 未完成（待送/草稿等）：現金單直接刪；記帳單先把掛在 ar_balances 的金額/桶數扣回（同取消邏輯）再刪
+// - 已完成現金單：刪（連同收款紀錄，報表營收會跟著減少）
+// - 已完成記帳單：跳過 —— 可能已部分收款，自動扣欠款容易算錯，請個別處理
+export async function bulkDeleteOrders(req: Request, res: Response) {
+  const ids: number[] = Array.isArray(req.body?.orderIds)
+    ? [...new Set<number>(req.body.orderIds.map(Number).filter((n: number) => Number.isInteger(n) && n > 0))]
+    : []
+  if (ids.length === 0) return res.status(400).json({ error: '沒有選擇任何訂單' })
+  if (ids.length > 500) return res.status(400).json({ error: '一次最多刪除 500 筆' })
+
+  let deleted = 0
+  const skipped: { id: number; reason: string }[] = []
+
+  for (const id of ids) {
+    const conn = await db.getConnection()
+    try {
+      await conn.beginTransaction()
+      const [rows] = await conn.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]) as any
+      const o = rows[0]
+      if (!o) { await conn.rollback(); continue }
+
+      if (o.status === 'DELIVERED' && o.payment_type === 'AR') {
+        await conn.rollback()
+        skipped.push({ id, reason: '已完成的記帳單' })
+        continue
+      }
+      if (o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && o.payment_type === 'AR') {
+        await conn.query(
+          `UPDATE ar_balances SET amount_owed = amount_owed - ?, cylinders_owed = cylinders_owed - ? WHERE customer_id = ?`,
+          [o.total_amount, o.quantity, o.customer_id]
+        )
+      }
+      await conn.query('DELETE FROM order_items WHERE order_id = ?', [id])
+      await conn.query('DELETE FROM payments WHERE order_id = ?', [id])
+      await conn.query('DELETE FROM orders WHERE id = ?', [id])
+      await conn.commit()
+      deleted++
+    } catch (err) {
+      await conn.rollback()
+      console.error('[bulk-delete]', id, err)
+      skipped.push({ id, reason: '有其他資料關聯，無法刪除' })
+    } finally {
+      conn.release()
+    }
+  }
+  res.json({ ok: true, deleted, skipped })
+}

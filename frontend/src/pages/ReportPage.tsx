@@ -88,7 +88,47 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
     }
   }
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const allSelected = searchOrders.length > 0 && searchOrders.every((o: any) => selectedIds.has(o.id))
+
+  function toggleSelect(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  function toggleSelectAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(searchOrders.map((o: any) => o.id)))
+  }
+
+  async function bulkDelete() {
+    const chosen = searchOrders.filter((o: any) => selectedIds.has(o.id))
+    if (chosen.length === 0) return
+    const arDone = chosen.filter((o: any) => o.status === 'DELIVERED' && o.payment_type === 'AR').length
+    const done = chosen.filter((o: any) => o.status === 'DELIVERED').length - arDone
+    const lines = [`確定刪除 ${chosen.length} 筆訂單？刪除後無法復原。`]
+    if (done > 0) lines.push(`\n其中 ${done} 筆已完成的現金單，刪除後報表營收會跟著減少。`)
+    if (arDone > 0) lines.push(`\n其中 ${arDone} 筆已完成的記帳單會被跳過（可能已部分收款，請個別處理）。`)
+    if (!window.confirm(lines.join(''))) return
+    setBulkDeleting(true)
+    try {
+      const r = await api.bulkDeleteOrders(chosen.map((o: any) => o.id))
+      const msg = [`已刪除 ${r.deleted} 筆`]
+      if (r.skipped?.length) msg.push(`，跳過 ${r.skipped.length} 筆（${[...new Set(r.skipped.map((s: any) => s.reason))].join('、')}）`)
+      alert(msg.join(''))
+      setCustomerHistory({})
+      await searchOrderHistory()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   async function searchOrderHistory() {
+    setSelectedIds(new Set())
     setSearchLoading(true)
     try {
       const params: any = { all: true, limit: 200 }
@@ -446,9 +486,30 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
 
           {!searchLoading && searchOrders.length > 0 && (
             <div className="space-y-2">
-              <div className="text-sm text-gray-500">{searchDate ? `${searchDate} ` : ''}共 {searchOrders.length} 筆</div>
+              <div className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur -mx-1 px-1 py-2 flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="w-5 h-5 accent-red-500"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && !allSelected }}
+                    onChange={toggleSelectAll}
+                  />
+                  全選
+                </label>
+                <span className="text-sm text-gray-500 flex-1">{searchDate ? `${searchDate} ` : ''}共 {searchOrders.length} 筆{selectedIds.size > 0 && `，已選 ${selectedIds.size} 筆`}</span>
+                {selectedIds.size > 0 && (
+                  <button onClick={bulkDelete} disabled={bulkDeleting} className="px-4 h-10 rounded-xl bg-red-500 hover:bg-red-600 disabled:bg-gray-300 text-white text-sm font-medium whitespace-nowrap">
+                    {bulkDeleting ? '刪除中…' : `刪除所選（${selectedIds.size}）`}
+                  </button>
+                )}
+              </div>
               {searchOrders.map((o: any) => (
-                <div key={o.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                <div key={o.id} className={`border rounded-xl p-3 flex gap-3 ${selectedIds.has(o.id) ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}>
+                  <label className="flex items-start pt-0.5 -m-2 p-2 cursor-pointer" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" className="w-5 h-5 accent-red-500" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                  </label>
+                  <div className="flex-1 min-w-0">
                   <div
                     className="flex justify-between items-start cursor-pointer"
                     onClick={() => o.customer_id && loadCustomerHistory(o.customer_id)}
@@ -673,6 +734,7 @@ export default function ReportPage({ onEditCustomer }: { onEditCustomer?: (custo
                     {(o.status === 'CANCELLED' || o.status === 'DELIVERED') && (
                       <button onClick={async () => { if(window.confirm('確定刪除？')) { try { await api.deleteOrder(o.id); searchOrderHistory() } catch(e: any) { alert(e.message) }}}} className="px-3 bg-gray-100 hover:bg-red-100 text-gray-500 hover:text-red-500 text-xs py-1.5 rounded-lg transition">🗑 刪除</button>
                     )}
+                  </div>
                   </div>
                 </div>
               ))}
