@@ -22,7 +22,7 @@ const PHONE = '06-2231668'
 type Item = { gasType: string; qty: number }
 type Me =
   | { bound: false }
-  | { bound: true; customer: { name: string; address: string }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null }
+  | { bound: true; customer: { name: string; address: string; phone: string }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null }
 
 function taipeiNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
@@ -40,7 +40,7 @@ const MOCK = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(
 export default function LiffOrder() {
   const [liff, setLiff] = useState<Liff | null>(null)
   const [token, setToken] = useState('')
-  const [phase, setPhase] = useState<'loading' | 'error' | 'bind' | 'order' | 'done'>('loading')
+  const [phase, setPhase] = useState<'loading' | 'error' | 'bind' | 'order' | 'profile' | 'done'>('loading')
   const [fatal, setFatal] = useState('')
   const [me, setMe] = useState<Me | null>(null)
   const [done, setDone] = useState<{ summary: string; dateLabel: string } | null>(null)
@@ -103,7 +103,11 @@ export default function LiffOrder() {
         {phase === 'bind' && <BindForm api={api} onBound={() => loadMe()} />}
 
         {phase === 'order' && me?.bound && (
-          <OrderForm me={me} api={api} onDone={r => { setDone(r); setPhase('done') }} />
+          <OrderForm me={me} api={api} onDone={r => { setDone(r); setPhase('done') }} onEditProfile={() => setPhase('profile')} />
+        )}
+
+        {phase === 'profile' && me?.bound && (
+          <ProfileForm me={me} api={api} onBack={() => setPhase('order')} onSaved={() => loadMe()} />
         )}
 
         {phase === 'done' && done && (
@@ -171,10 +175,11 @@ function BindForm({ api, onBound }: { api: (p: string, b?: any) => Promise<any>;
 }
 
 /* ─── 訂購表單 ─── */
-function OrderForm({ me, api, onDone }: {
+function OrderForm({ me, api, onDone, onEditProfile }: {
   me: Extract<Me, { bound: true }>
   api: (p: string, b?: any) => Promise<any>
   onDone: (r: { summary: string; dateLabel: string }) => void
+  onEditProfile: () => void
 }) {
   const initQty: Record<string, number> = {}
   for (const it of me.lastItems) initQty[it.gasType] = (initQty[it.gasType] || 0) + it.qty
@@ -200,9 +205,14 @@ function OrderForm({ me, api, onDone }: {
 
   return (
     <>
-      <h1 className="text-2xl font-bold">叫瓦斯</h1>
-      <div className="mt-1 text-sm text-slate-500">
-        {me.customer.name}　{me.customer.address || '（地址未登記，請於備註填寫）'}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold">叫瓦斯</h1>
+          <div className="mt-1 text-sm text-slate-500">
+            {me.customer.name}　{me.customer.address || '（地址未登記）'}
+          </div>
+        </div>
+        <button onClick={onEditProfile} className="shrink-0 mt-1 text-sm text-slate-600 border border-slate-300 bg-white rounded-lg px-3 h-9">修改資料</button>
       </div>
 
       {me.activeOrder && (
@@ -257,6 +267,44 @@ function OrderForm({ me, api, onDone }: {
         <button onClick={submit} disabled={total === 0 || busy} className={PRIMARY}>
           {busy ? '送出中…' : total === 0 ? '請選擇數量' : `送出訂單（共 ${total} 桶）`}
         </button>
+      </BottomBar>
+    </>
+  )
+}
+
+/* ─── 修改資料 ─── */
+function ProfileForm({ me, api, onBack, onSaved }: {
+  me: Extract<Me, { bound: true }>
+  api: (p: string, b?: any) => Promise<any>
+  onBack: () => void
+  onSaved: () => void
+}) {
+  const [name, setName] = useState(me.customer.name || '')
+  const [address, setAddress] = useState(me.customer.address === '（待補）' ? '' : (me.customer.address || ''))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save() {
+    setErr(''); setBusy(true)
+    try { await api('/profile', { name, address }); onSaved() }
+    catch (e: any) { setErr(e.message); setBusy(false) }
+  }
+
+  return (
+    <>
+      <button onClick={onBack} className="text-sm text-slate-500 -ml-1 px-1 py-1">‹ 返回訂購</button>
+      <h1 className="text-2xl font-bold mt-1">修改資料</h1>
+      <section className={`${CARD} mt-4 space-y-3`}>
+        <Field label="姓名／店名"><input className={INPUT} value={name} onChange={e => setName(e.target.value)} /></Field>
+        <Field label="配送地址"><input className={INPUT} placeholder="含樓層" value={address} onChange={e => setAddress(e.target.value)} /></Field>
+        <Field label="電話">
+          <input className={INPUT} value={me.customer.phone || ''} disabled />
+        </Field>
+        <div className="text-xs text-slate-400">電話是辨識您的依據，如需更換請來電 {PHONE}</div>
+        {err && <div className="text-sm text-red-600">{err}</div>}
+      </section>
+      <BottomBar>
+        <button onClick={save} disabled={busy || !name.trim() || !address.trim()} className={PRIMARY}>{busy ? '儲存中…' : '儲存'}</button>
       </BottomBar>
     </>
   )

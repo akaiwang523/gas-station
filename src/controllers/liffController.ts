@@ -49,7 +49,7 @@ export async function liffMe(req: LiffReq, res: Response) {
   const customerId = await getBoundCustomerId(req.lineUserId!)
   if (!customerId) return res.json({ bound: false })
 
-  const [cRows] = await db.query(`SELECT id, name, address FROM customers WHERE id = ?`, [customerId]) as any
+  const [cRows] = await db.query(`SELECT id, name, address, phone FROM customers WHERE id = ?`, [customerId]) as any
   const customer = cRows[0]
   if (!customer) return res.json({ bound: false })
 
@@ -78,7 +78,7 @@ export async function liffMe(req: LiffReq, res: Response) {
     }
   }
 
-  res.json({ bound: true, customer: { name: customer.name, address: customer.address }, lastItems, activeOrder })
+  res.json({ bound: true, customer: { name: customer.name, address: customer.address, phone: customer.phone }, lastItems, activeOrder })
 }
 
 // POST /api/line/liff/bind { phone } → 找到既有客戶就綁定；找不到回 needProfile
@@ -141,4 +141,32 @@ export async function liffOrder(req: LiffReq, res: Response) {
     console.error('[liff order]', err)
     res.status(500).json({ error: '訂單建立失敗，請稍後再試或直接來電' })
   }
+}
+
+// POST /api/line/liff/profile { name, address } — 客人自行修改姓名／地址。
+// 電話是辨識依據，不開放自行修改。每次修改都在客戶備註留一行紀錄，讓後台看得到改了什麼。
+export async function liffProfile(req: LiffReq, res: Response) {
+  const customerId = await getBoundCustomerId(req.lineUserId!)
+  if (!customerId) return res.status(400).json({ error: '尚未綁定，請重新開啟頁面' })
+
+  const name = String(req.body?.name || '').trim().slice(0, 50)
+  const address = String(req.body?.address || '').trim().slice(0, 200)
+  if (!name || !address) return res.status(400).json({ error: '姓名和地址都要填寫' })
+
+  const [rows] = await db.query(`SELECT name, address FROM customers WHERE id = ?`, [customerId]) as any
+  const old = rows[0]
+  if (!old) return res.status(404).json({ error: '找不到客戶資料' })
+
+  const changes: string[] = []
+  if (old.name !== name) changes.push(`姓名 ${old.name || '（空）'} → ${name}`)
+  if (old.address !== address) changes.push(`地址 ${old.address || '（空）'} → ${address}`)
+  if (changes.length === 0) return res.json({ ok: true, changed: false })
+
+  const t = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
+  const log = `\n[${t.getMonth() + 1}/${t.getDate()} LINE 自行修改：${changes.join('；')}]`
+  await db.query(
+    `UPDATE customers SET name = ?, address = ?, note = CONCAT(COALESCE(note, ''), ?) WHERE id = ?`,
+    [name, address, log, customerId]
+  )
+  res.json({ ok: true, changed: true })
 }
