@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { db } from '../lib/db'
 import { insertLineOrder, resolveDateChoice } from './lineController'
+import { normalizePhone } from '../lib/phone'
 
 // LIFF 網頁訂購：客人在 LINE 裡開網頁一次填完，不再一句一句跳選單。
 // 身分驗證用 LINE 的 ID token（前端 liff.getIDToken()），後端向 LINE 驗證後取得 userId（sub），
@@ -49,7 +50,7 @@ export async function liffMe(req: LiffReq, res: Response) {
   const customerId = await getBoundCustomerId(req.lineUserId!)
   if (!customerId) return res.json({ bound: false })
 
-  const [cRows] = await db.query(`SELECT id, name, address, phone FROM customers WHERE id = ?`, [customerId]) as any
+  const [cRows] = await db.query(`SELECT id, name, address, phone, phone2 FROM customers WHERE id = ?`, [customerId]) as any
   const customer = cRows[0]
   if (!customer) return res.json({ bound: false })
 
@@ -78,7 +79,10 @@ export async function liffMe(req: LiffReq, res: Response) {
     }
   }
 
-  res.json({ bound: true, customer: { name: customer.name, address: customer.address, phone: customer.phone }, lastItems, activeOrder })
+  const [extra] = await db.query(`SELECT phone FROM customer_phones WHERE customer_id = ? ORDER BY id`, [customerId]) as any
+  const phones = [...new Set([customer.phone, customer.phone2, ...extra.map((r: any) => r.phone)].filter(Boolean))]
+
+  res.json({ bound: true, customer: { name: customer.name, address: customer.address, phones }, lastItems, activeOrder })
 }
 
 // POST /api/line/liff/bind { phone } → 找到既有客戶就綁定；找不到回 needProfile
@@ -144,7 +148,7 @@ export async function liffOrder(req: LiffReq, res: Response) {
 }
 
 // POST /api/line/liff/profile { name, address } — 客人自行修改姓名／地址。
-// 電話是辨識依據，不開放自行修改。每次修改都在客戶備註留一行紀錄，讓後台看得到改了什麼。
+// 電話另外用 /liff/phone 只能「新增」，不能改掉舊號碼（舊號碼是來電辨識依據）。每次修改都在客戶備註留一行紀錄，讓後台看得到改了什麼。
 export async function liffProfile(req: LiffReq, res: Response) {
   const customerId = await getBoundCustomerId(req.lineUserId!)
   if (!customerId) return res.status(400).json({ error: '尚未綁定，請重新開啟頁面' })
@@ -168,5 +172,30 @@ export async function liffProfile(req: LiffReq, res: Response) {
     `UPDATE customers SET name = ?, address = ?, note = CONCAT(COALESCE(note, ''), ?) WHERE id = ?`,
     [name, address, log, customerId]
   )
+  res.json({ ok: true, changed: true })
+}
+
+// POST /api/line/liff/phone { phone } — 客人自行「新增」一支電話（加到 customer_phones，舊號碼保留）。
+// 已經屬於其他客戶的號碼一律擋下，避免同一支電話對到兩個人、來電比對或綁定對錯人。
+export async function liffAddPhone(req: LiffReq, res: Response) {
+  const customerId = await getBoundCustomerId(req.lineUserId!)
+  if (!customerId) return res.status(400).json({ error: '尚未綁定，請重新開啟頁面' })
+
+  const phone = normalizePhone(String(req.body?.phone || ''))
+  if (!/^0\d{8,9}$/.test(phone)) return res.status(400).json({ error: '請輸入正確的電話號碼（市話請加區碼）' })
+
+  const [owners] = await db.query(
+    `SELECT c.id FROM customers c WHERE (c.phone = ? OR c.phone2 = ? OR EXISTS (
+      SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone = ?
+    ))`,
+    [phone, phone, phone]
+  ) as any
+  if (owners.some((o: any) => o.id === customerId)) return res.json({ ok: true, changed: false })
+  if (owners.length > 0) return res.status(409).json({ error: '這支電話已登記在其他帳號，請來電由我們協助處理' })
+
+  const t = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
+  const log = `\n[${t.getMonth() + 1}/${t.getDate()} LINE 自行新增電話：${phone}]`
+  await db.query(`INSERT IGNORE INTO customer_phones (customer_id, phone) VALUES (?, ?)`, [customerId, phone])
+  await db.query(`UPDATE customers SET note = CONCAT(COALESCE(note, ''), ?) WHERE id = ?`, [log, customerId])
   res.json({ ok: true, changed: true })
 }

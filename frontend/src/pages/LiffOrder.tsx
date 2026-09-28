@@ -22,7 +22,7 @@ const PHONE = '06-2231668'
 type Item = { gasType: string; qty: number }
 type Me =
   | { bound: false }
-  | { bound: true; customer: { name: string; address: string; phone: string }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null }
+  | { bound: true; customer: { name: string; address: string; phones: string[] }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null }
 
 function taipeiNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
@@ -107,7 +107,8 @@ export default function LiffOrder() {
         )}
 
         {phase === 'profile' && me?.bound && (
-          <ProfileForm me={me} api={api} onBack={() => setPhase('order')} onSaved={() => loadMe()} />
+          <ProfileForm me={me} api={api} onBack={() => setPhase('order')} onSaved={() => loadMe()}
+            onPhoneAdded={() => api('/me').then(setMe).catch(() => {})} />
         )}
 
         {phase === 'done' && done && (
@@ -273,16 +274,32 @@ function OrderForm({ me, api, onDone, onEditProfile }: {
 }
 
 /* ─── 修改資料 ─── */
-function ProfileForm({ me, api, onBack, onSaved }: {
+function ProfileForm({ me, api, onBack, onSaved, onPhoneAdded }: {
   me: Extract<Me, { bound: true }>
   api: (p: string, b?: any) => Promise<any>
   onBack: () => void
   onSaved: () => void
+  onPhoneAdded: () => void
 }) {
   const [name, setName] = useState(me.customer.name || '')
   const [address, setAddress] = useState(me.customer.address === '（待補）' ? '' : (me.customer.address || ''))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [addingPhone, setAddingPhone] = useState(false)
+  const [newPhone, setNewPhone] = useState('')
+  const [phoneBusy, setPhoneBusy] = useState(false)
+  const [phoneErr, setPhoneErr] = useState('')
+  const [phoneMsg, setPhoneMsg] = useState('')
+
+  async function addPhone() {
+    setPhoneErr(''); setPhoneMsg(''); setPhoneBusy(true)
+    try {
+      const r = await api('/phone', { phone: newPhone })
+      setPhoneMsg(r.changed ? '已新增電話' : '這支電話已經登記過了')
+      setAddingPhone(false); setNewPhone('')
+      if (r.changed) onPhoneAdded()
+    } catch (e: any) { setPhoneErr(e.message) } finally { setPhoneBusy(false) }
+  }
 
   async function save() {
     setErr(''); setBusy(true)
@@ -297,11 +314,31 @@ function ProfileForm({ me, api, onBack, onSaved }: {
       <section className={`${CARD} mt-4 space-y-3`}>
         <Field label="姓名／店名"><input className={INPUT} value={name} onChange={e => setName(e.target.value)} /></Field>
         <Field label="配送地址"><input className={INPUT} placeholder="含樓層" value={address} onChange={e => setAddress(e.target.value)} /></Field>
-        <Field label="電話">
-          <input className={INPUT} value={me.customer.phone || ''} disabled />
-        </Field>
-        <div className="text-xs text-slate-400">電話是辨識您的依據，如需更換請來電 {PHONE}</div>
         {err && <div className="text-sm text-red-600">{err}</div>}
+      </section>
+
+      <section className={`${CARD} mt-3`}>
+        <div className={LABEL}>電話</div>
+        <div className="space-y-1.5">
+          {me.customer.phones.length === 0 && <div className="text-sm text-slate-400">尚未登記</div>}
+          {me.customer.phones.map(p => (
+            <div key={p} className="h-11 px-3.5 flex items-center rounded-xl bg-slate-50 border border-slate-200 text-slate-600 tabular-nums">{p}</div>
+          ))}
+        </div>
+        {addingPhone ? (
+          <div className="mt-3 space-y-2">
+            <input className={INPUT} inputMode="tel" placeholder="新電話號碼（市話請加區碼）" value={newPhone} onChange={e => setNewPhone(e.target.value)} />
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => { setAddingPhone(false); setNewPhone(''); setPhoneErr('') }} className="h-11 rounded-xl border border-slate-300 bg-white text-slate-600">取消</button>
+              <button onClick={addPhone} disabled={phoneBusy || newPhone.replace(/\D/g, '').length < 9} className="h-11 rounded-xl bg-slate-800 text-white font-medium disabled:bg-slate-300">{phoneBusy ? '新增中…' : '新增'}</button>
+            </div>
+            {phoneErr && <div className="text-sm text-red-600">{phoneErr}</div>}
+          </div>
+        ) : (
+          <button onClick={() => setAddingPhone(true)} className="mt-3 w-full h-11 rounded-xl border border-slate-300 bg-white text-sm font-medium text-slate-700">＋ 新增電話</button>
+        )}
+        {phoneMsg && <div className="mt-2 text-sm text-green-700">{phoneMsg}</div>}
+        <div className="text-xs text-slate-400 mt-3">原有號碼會保留，打哪一支來我們都認得。需要刪除舊號碼請來電 {PHONE}</div>
       </section>
       <BottomBar>
         <button onClick={save} disabled={busy || !name.trim() || !address.trim()} className={PRIMARY}>{busy ? '儲存中…' : '儲存'}</button>
