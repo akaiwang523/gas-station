@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!
+// 有 LIFF_ID 時，左上「我要叫瓦斯」直接開網頁訂購頁
+const LIFF_ID = process.env.LIFF_ID
 
 async function main() {
   if (!ACCESS_TOKEN) {
@@ -34,7 +36,9 @@ async function main() {
     areas: [
       {
         bounds: { x: 0, y: 0, width: 1250, height: 421 },
-        action: { type: 'postback', data: 'action=order' }
+        action: LIFF_ID
+          ? { type: 'uri', uri: `https://liff.line.me/${LIFF_ID}` }
+          : { type: 'postback', data: 'action=order' }
       },
       {
         bounds: { x: 1250, y: 0, width: 1250, height: 421 },
@@ -51,6 +55,7 @@ async function main() {
     ]
   }
 
+  console.log(LIFF_ID ? `「我要叫瓦斯」→ LIFF ${LIFF_ID}` : '未設定 LIFF_ID，「我要叫瓦斯」維持聊天流程')
   console.log('建立 Rich Menu 結構...')
   const createRes = await fetch('https://api.line.me/v2/bot/richmenu', {
     method: 'POST',

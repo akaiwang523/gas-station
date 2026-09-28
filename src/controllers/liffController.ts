@@ -1,0 +1,144 @@
+import { Request, Response, NextFunction } from 'express'
+import { db } from '../lib/db'
+import { insertLineOrder, resolveDateChoice } from './lineController'
+
+// LIFF 網頁訂購：客人在 LINE 裡開網頁一次填完，不再一句一句跳選單。
+// 身分驗證用 LINE 的 ID token（前端 liff.getIDToken()），後端向 LINE 驗證後取得 userId（sub），
+// 不信任前端直接傳來的 userId。
+// 需要的環境變數只有 LIFF_ID；LINE Login channel ID 就是 LIFF ID 的「-」前半段。
+const LIFF_ID = process.env.LIFF_ID || ''
+const LOGIN_CHANNEL_ID = LIFF_ID.split('-')[0]
+
+const GAS_TYPES = ['BOTTLED_20KG', 'BOTTLED_16KG', 'BOTTLED_10KG', 'BOTTLED_4KG']
+const SLOTS = ['上午', '中午', '傍晚', '都可以']
+const DATE_CHOICES = ['today', 'tomorrow', 'dayafter']
+
+type LiffReq = Request & { lineUserId?: string }
+
+// GET /api/line/liff/config — 前端啟動時拿 LIFF ID（不用在 build 時寫死）
+export function liffConfig(_req: Request, res: Response) {
+  res.json({ liffId: LIFF_ID || null })
+}
+
+export async function liffAuth(req: LiffReq, res: Response, next: NextFunction) {
+  const idToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!idToken || !LOGIN_CHANNEL_ID) return res.status(401).json({ error: '請從 LINE 開啟此頁面' })
+  try {
+    const r = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ id_token: idToken, client_id: LOGIN_CHANNEL_ID }).toString(),
+    })
+    const data = await r.json() as any
+    if (!r.ok || !data.sub) return res.status(401).json({ error: '登入已過期，請關閉後重新開啟' })
+    req.lineUserId = data.sub
+    next()
+  } catch (err) {
+    console.error('[liff verify]', err)
+    res.status(502).json({ error: '暫時無法驗證 LINE 身分，請稍後再試' })
+  }
+}
+
+async function getBoundCustomerId(lineUserId: string): Promise<number | null> {
+  const [rows] = await db.query(`SELECT customer_id FROM line_users WHERE line_user_id = ?`, [lineUserId]) as any
+  return rows[0]?.customer_id ?? null
+}
+
+// GET /api/line/liff/me — 綁定狀態、客戶基本資料、上次叫的品項、進行中的訂單
+export async function liffMe(req: LiffReq, res: Response) {
+  const customerId = await getBoundCustomerId(req.lineUserId!)
+  if (!customerId) return res.json({ bound: false })
+
+  const [cRows] = await db.query(`SELECT id, name, address FROM customers WHERE id = ?`, [customerId]) as any
+  const customer = cRows[0]
+  if (!customer) return res.json({ bound: false })
+
+  const [lastRows] = await db.query(
+    `SELECT id FROM orders WHERE customer_id = ? AND status != 'CANCELLED' ORDER BY created_at DESC LIMIT 1`,
+    [customerId]
+  ) as any
+  const lastItems = lastRows[0]
+    ? ((await db.query(`SELECT gas_type, quantity FROM order_items WHERE order_id = ?`, [lastRows[0].id]) as any)[0])
+        .map((i: any) => ({ gasType: i.gas_type, qty: Number(i.quantity) }))
+    : []
+
+  const [activeRows] = await db.query(
+    `SELECT o.id, o.status, o.scheduled_date, o.created_at FROM orders o
+     WHERE o.customer_id = ? AND o.status IN ('PENDING','ASSIGNED','DELIVERING')
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [customerId]
+  ) as any
+  let activeOrder = null
+  if (activeRows[0]) {
+    const [ai] = await db.query(`SELECT gas_type, quantity FROM order_items WHERE order_id = ?`, [activeRows[0].id]) as any
+    activeOrder = {
+      id: activeRows[0].id,
+      status: activeRows[0].status,
+      items: ai.map((i: any) => ({ gasType: i.gas_type, qty: Number(i.quantity) })),
+    }
+  }
+
+  res.json({ bound: true, customer: { name: customer.name, address: customer.address }, lastItems, activeOrder })
+}
+
+// POST /api/line/liff/bind { phone } → 找到既有客戶就綁定；找不到回 needProfile
+// POST /api/line/liff/bind { phone, name, address } → 建新客戶並綁定
+export async function liffBind(req: LiffReq, res: Response) {
+  const phone = String(req.body?.phone || '').replace(/[^\d]/g, '')
+  if (phone.length < 8) return res.status(400).json({ error: '請輸入正確的電話號碼' })
+  const userId = req.lineUserId!
+
+  // 主電話、副電話、customer_phones 三處都要比對（與聊天綁定流程一致）
+  const [rows] = await db.query(
+    `SELECT id, name FROM customers c WHERE (c.phone = ? OR c.phone2 = ? OR EXISTS (
+      SELECT 1 FROM customer_phones cp WHERE cp.customer_id = c.id AND cp.phone = ?
+    )) AND c.status = 'ACTIVE' LIMIT 1`,
+    [phone, phone, phone]
+  ) as any
+
+  let customerId: number
+  if (rows[0]) {
+    customerId = rows[0].id
+  } else {
+    const name = String(req.body?.name || '').trim()
+    const address = String(req.body?.address || '').trim()
+    if (!name || !address) return res.json({ needProfile: true })
+    const [result] = await db.query(
+      `INSERT INTO customers (name, phone, address, gas_type, status, delivery_cycle)
+       VALUES (?, ?, ?, 'BOTTLED_20KG', 'ACTIVE', 'ON_CALL')`,
+      [name, phone, address]
+    ) as any
+    customerId = result.insertId
+  }
+  await db.query(
+    `INSERT INTO line_users (line_user_id, customer_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE customer_id = ?`,
+    [userId, customerId, customerId]
+  )
+  res.json({ ok: true })
+}
+
+// POST /api/line/liff/order { items:[{gasType,qty}], date, slot, note }
+export async function liffOrder(req: LiffReq, res: Response) {
+  const customerId = await getBoundCustomerId(req.lineUserId!)
+  if (!customerId) return res.status(400).json({ error: '尚未綁定，請重新開啟頁面' })
+
+  const rawItems: any[] = Array.isArray(req.body?.items) ? req.body.items : []
+  const items = rawItems
+    .map(i => ({ gasType: String(i.gasType), qty: Math.floor(Number(i.qty)) }))
+    .filter(i => GAS_TYPES.includes(i.gasType) && i.qty > 0 && i.qty <= 50)
+  if (items.length === 0) return res.status(400).json({ error: '請至少選擇一桶' })
+
+  const date = DATE_CHOICES.includes(req.body?.date) ? req.body.date : 'today'
+  const slot = SLOTS.includes(req.body?.slot) ? req.body.slot : '都可以'
+  const note = String(req.body?.note || '').trim().slice(0, 100)
+
+  const { scheduledDate, label } = resolveDateChoice(date)
+  const dateLabel = slot === '都可以' ? label : `${label} ${slot}`
+  try {
+    const r = await insertLineOrder(customerId, items, scheduledDate, dateLabel, note)
+    res.json({ ok: true, orderId: r.orderId, summary: r.itemsSummary, dateLabel })
+  } catch (err) {
+    console.error('[liff order]', err)
+    res.status(500).json({ error: '訂單建立失敗，請稍後再試或直接來電' })
+  }
+}

@@ -4,6 +4,8 @@ import { db } from '../lib/db'
 
 const ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN!
 const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET!
+// 有設定 LIFF_ID 時，「我要叫瓦斯」改開網頁訂購頁；沒設定就維持舊的聊天選單流程
+const LIFF_URL = process.env.LIFF_ID ? `https://liff.line.me/${process.env.LIFF_ID}` : ''
 
 // 驗證 LINE 簽名
 function verifySignature(body: Buffer, signature: string): boolean {
@@ -49,7 +51,9 @@ function mainMenu() {
       title: '🔥 瓦斯行服務',
       text: '請選擇您需要的服務',
       actions: [
-        { type: 'postback', label: '🛒 我要叫瓦斯', data: 'action=order' },
+        LIFF_URL
+          ? { type: 'uri', label: '🛒 我要叫瓦斯', uri: LIFF_URL }
+          : { type: 'postback', label: '🛒 我要叫瓦斯', data: 'action=order' },
         { type: 'postback', label: '⚡ 一鍵叫瓦斯', data: 'action=quick_order' },
         { type: 'postback', label: '📋 查詢訂單狀態', data: 'action=status' },
         { type: 'postback', label: '📞 聯絡我們', data: 'action=contact' }
@@ -136,7 +140,7 @@ function taipeiDateString(daysOffset: number): string {
 
 // dateChoice ('today'/'tomorrow'/'dayafter') 轉換成實際要存進 orders.scheduled_date 的值 + 顯示用文字
 // today 存 null（跟其他管道一樣代表「今天，不特別排定」），tomorrow/dayafter 存實際日期字串
-function resolveDateChoice(dateChoice: string): { scheduledDate: string | null, label: string } {
+export function resolveDateChoice(dateChoice: string): { scheduledDate: string | null, label: string } {
   const offset = DATE_CHOICE_OFFSET[dateChoice] ?? 0
   const dateStr = taipeiDateString(offset)
   const [, m, d] = dateStr.split('-')
@@ -294,7 +298,21 @@ export async function handleLineWebhook(req: Request, res: Response) {
       const params = new URLSearchParams(event.postback.data)
       const action = params.get('action')
 
-      if (action === 'order') {
+      // 舊版 Rich Menu／舊訊息上的「我要叫瓦斯」：有 LIFF 就只回一顆開啟網頁的按鈕
+      if (action === 'order' && LIFF_URL) {
+        userState[userId] = {}
+        await replyMessage(replyToken, [{
+          type: 'template',
+          altText: '開啟訂購頁',
+          template: {
+            type: 'buttons',
+            text: '點下方按鈕，在一個頁面選好品項與配送時間',
+            actions: [{ type: 'uri', label: '開啟訂購頁', uri: LIFF_URL }]
+          }
+        }])
+      }
+
+      else if (action === 'order') {
         const [binding] = await db.query(
           `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
         ) as any
@@ -492,17 +510,11 @@ export async function handleLineWebhook(req: Request, res: Response) {
   }
 }
 
-// items：一張訂單裡的所有品項（可能不只一種規格）；scheduledDate/dateLabel 是配送日期
-async function createLineOrder(
-  userId: string, replyToken: string, items: { gasType: string; qty: number }[],
-  scheduledDate: string | null = null, dateLabel: string = '今天'
+// 建單核心：LINE 聊天流程與 LIFF 網頁共用同一套定價與寫入邏輯
+export async function insertLineOrder(
+  customerId: number, items: { gasType: string; qty: number }[],
+  scheduledDate: string | null, dateLabel: string, extraNote = ''
 ) {
-  const [binding] = await db.query(
-    `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
-  ) as any
-  if (!binding[0]) return
-
-  const customerId = binding[0].customer_id
   const [customers] = await db.query(
     `SELECT price_override FROM customers WHERE id = ?`, [customerId]
   ) as any
@@ -525,6 +537,7 @@ async function createLineOrder(
   const totalAmount = priced.reduce((s, it) => s + it.subtotal, 0)
   // 主表 unit_price 是舊資料相容用的加權平均，實際品項明細以 order_items 為準
   const avgUnitPrice = totalQuantity > 0 ? totalAmount / totalQuantity : 0
+  const note = [`LINE預訂 / ${dateLabel}`, extraNote].filter(Boolean).join('、')
 
   const conn = await db.getConnection()
   try {
@@ -532,7 +545,7 @@ async function createLineOrder(
     const [result] = await conn.query(
       `INSERT INTO orders (customer_id, quantity, unit_price, total_amount, status, note, payment_type, source, scheduled_date)
        VALUES (?, ?, ?, ?, 'PENDING', ?, 'CASH', 'LINE', ?)`,
-      [customerId, totalQuantity, avgUnitPrice, totalAmount, `LINE預訂 / ${dateLabel}`, scheduledDate]
+      [customerId, totalQuantity, avgUnitPrice, totalAmount, note, scheduledDate]
     ) as any
     const orderId = result.insertId
     for (const it of priced) {
@@ -545,6 +558,27 @@ async function createLineOrder(
     const itemsSummary = priced
       .map(it => `${it.gasType.replace('BOTTLED_', '').replace('KG', 'kg')} × ${it.qty}`)
       .join('、')
+    return { orderId, itemsSummary, totalQuantity }
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
+}
+
+// items：一張訂單裡的所有品項（可能不只一種規格）；scheduledDate/dateLabel 是配送日期
+async function createLineOrder(
+  userId: string, replyToken: string, items: { gasType: string; qty: number }[],
+  scheduledDate: string | null = null, dateLabel: string = '今天'
+) {
+  const [binding] = await db.query(
+    `SELECT customer_id FROM line_users WHERE line_user_id = ?`, [userId]
+  ) as any
+  if (!binding[0]) return
+
+  try {
+    const { itemsSummary } = await insertLineOrder(binding[0].customer_id, items, scheduledDate, dateLabel)
     // LINE buttons template 的 text 欄位有長度上限，品項種類多的話組合起來的字串長度不受控，
     // 這裡截短一下避免超過上限導致整則訊息送不出去
     const itemsDisplay = itemsSummary.length > 40 ? itemsSummary.slice(0, 40) + '…' : itemsSummary
@@ -561,10 +595,7 @@ async function createLineOrder(
       }
     }])
   } catch (err) {
-    await conn.rollback()
     await replyMessage(replyToken, [{ type: 'text', text: '訂單建立失敗，請稍後再試或直接來電。' }])
-  } finally {
-    conn.release()
   }
 }
 
