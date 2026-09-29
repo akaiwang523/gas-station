@@ -627,3 +627,39 @@ export async function handleLineInquiry(req: Request, res: Response) {
   await db.query(`UPDATE line_inquiries SET status = 'HANDLED' WHERE id = ?`, [id])
   res.json({ ok: true })
 }
+
+// POST /api/line/inquiries/:id/to-order — 客人直接打字叫瓦斯：一鍵轉成待派送單
+// 品項用這位客人上次叫的（沒有就 20kg × 1），日期一律今天，客人原文放備註，要改再到清單裡改。
+// 不自動判讀「禮拜二」「明天」這類字，太容易錯。
+export async function convertLineInquiryToOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  if (!id) return res.status(400).json({ error: '缺少編號' })
+  const [rows] = await db.query(
+    `SELECT id, customer_id, message, status FROM line_inquiries WHERE id = ?`, [id]
+  ) as any
+  const inq = rows[0]
+  if (!inq) return res.status(404).json({ error: '找不到這則訊息' })
+  if (inq.status === 'HANDLED') return res.status(409).json({ error: '這則訊息已經處理過了' })
+  if (!inq.customer_id) return res.status(400).json({ error: '這個 LINE 帳號還沒綁定客戶，無法建單' })
+
+  const [last] = await db.query(
+    `SELECT id FROM orders WHERE customer_id = ? AND status NOT IN ('CANCELLED','DRAFT')
+     ORDER BY created_at DESC LIMIT 1`,
+    [inq.customer_id]
+  ) as any
+  let items: { gasType: string; qty: number }[] = []
+  if (last[0]) {
+    const [oi] = await db.query(`SELECT gas_type, quantity FROM order_items WHERE order_id = ?`, [last[0].id]) as any
+    items = oi.map((i: any) => ({ gasType: i.gas_type, qty: Number(i.quantity) })).filter((i: any) => i.qty > 0)
+  }
+  if (items.length === 0) items = [{ gasType: 'BOTTLED_20KG', qty: 1 }]
+
+  try {
+    const r = await insertLineOrder(inq.customer_id, items, null, '文字訊息', String(inq.message || '').slice(0, 200))
+    await db.query(`UPDATE line_inquiries SET status = 'HANDLED' WHERE id = ?`, [id])
+    res.json({ ok: true, orderId: r.orderId, summary: r.itemsSummary })
+  } catch (err) {
+    console.error('[inquiry to order]', err)
+    res.status(500).json({ error: '建單失敗' })
+  }
+}

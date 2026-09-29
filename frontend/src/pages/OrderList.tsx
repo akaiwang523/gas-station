@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { showToast } from '../lib/toast'
 import { api } from '../lib/api'
 type Order = {
   id: number
@@ -796,36 +797,62 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             className="w-full flex items-center justify-between"
             onClick={() => setInquiriesExpanded(prev => !prev)}
           >
-            <div className="text-sm font-bold text-purple-800">💬 LINE 詢問（不是叫瓦斯）<span className="ml-2 bg-purple-200 text-purple-800 text-xs px-2 py-0.5 rounded-full">{lineInquiries.length}</span></div>
+            <div className="text-sm font-bold text-purple-800">LINE 訊息<span className="ml-2 bg-purple-200 text-purple-800 text-xs px-2 py-0.5 rounded-full">{lineInquiries.length}</span></div>
             <span className="text-purple-400 text-xs">{inquiriesExpanded ? '▲ 收合' : '▼ 展開'}</span>
           </button>
           {inquiriesExpanded && (
             <div className="space-y-2 mt-2">
-              {lineInquiries.map(inq => (
-                <div key={inq.id} className="bg-white rounded-lg p-2.5 border border-purple-100">
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs text-gray-500">
-                        {inq.customer_name ? `${inq.customer_name}（${inq.customer_phone}）` : '尚未綁定客戶'}
-                        <span className="text-gray-300 ml-2">{new Date(inq.created_at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
-                      </div>
-                      <div className="text-sm text-gray-800 mt-1 break-words">{inq.message}</div>
-                    </div>
+              {lineInquiries.map(inq => {
+                const busy = inquiryActionId === inq.id
+                const done = (msg?: string) => {
+                  setLineInquiries(prev => prev.filter(x => x.id !== inq.id))
+                  if (msg) { showToast(msg); load() }
+                }
+                return (
+                <div key={inq.id} className="bg-white rounded-lg p-3 border border-purple-100">
+                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <span className="truncate">{inq.customer_name ? `${inq.customer_name}（${inq.customer_phone}）` : '尚未綁定客戶'}</span>
+                    {inq.customer_id && onEditCustomer && (
+                      <button
+                        onClick={() => onEditCustomer(inq.customer_id)}
+                        className="text-slate-400 hover:text-blue-600 flex-shrink-0 p-1.5 -m-1"
+                        title="編輯客戶資料"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                      </button>
+                    )}
+                    <span className="text-gray-300 ml-1 flex-shrink-0">{new Date(inq.created_at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
+                  </div>
+                  <div className="text-base text-gray-800 mt-1 break-words">{inq.message}</div>
+                  <div className="flex justify-end gap-2 mt-2">
                     <button
                       onClick={async () => {
                         setInquiryActionId(inq.id)
-                        try {
-                          await api.handleLineInquiry(inq.id)
-                          setLineInquiries(prev => prev.filter(x => x.id !== inq.id))
-                        } catch { /* 失敗就算了，重新整理還是看得到 */ }
+                        try { await api.handleLineInquiry(inq.id); done() }
+                        catch { /* 失敗就算了，重新整理還是看得到 */ }
                         finally { setInquiryActionId(null) }
                       }}
-                      disabled={inquiryActionId === inq.id}
-                      className="text-xs text-purple-500 hover:text-purple-700 flex-shrink-0"
-                    >✓ 已處理</button>
+                      disabled={busy}
+                      className="h-10 px-4 rounded-lg text-sm border border-slate-300 bg-white text-slate-600 active:bg-slate-100"
+                    >已處理</button>
+                    {inq.customer_id && (
+                      <button
+                        onClick={async () => {
+                          setInquiryActionId(inq.id)
+                          try {
+                            const r: any = await api.lineInquiryToOrder(inq.id)
+                            done(`已建立訂單：${inq.customer_name} ${r.summary}`)
+                          } catch (e: any) { showToast(e.message || '建單失敗', 'error') }
+                          finally { setInquiryActionId(null) }
+                        }}
+                        disabled={busy}
+                        className="h-10 px-4 rounded-lg text-sm font-bold bg-blue-600 text-white disabled:bg-slate-300"
+                      >{busy ? '處理中…' : '建立訂單'}</button>
+                    )}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
