@@ -22,7 +22,7 @@ const PHONE = '06-2231668'
 type Item = { gasType: string; qty: number }
 type Me =
   | { bound: false }
-  | { bound: true; customer: { name: string; address: string; phones: string[] }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null }
+  | { bound: true; customer: { name: string; address: string; phones: string[] }; lastItems: Item[]; activeOrder: { id: number; status: string; items: Item[] } | null; history?: { date: string; items: Item[] }[]; typicalDays?: number | null }
 
 function taipeiNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }))
@@ -33,6 +33,14 @@ function dateText(offset: number) {
 }
 const gasLabel = (t: string) => GAS.find(g => g.type === t)?.label || t
 const itemsText = (items: Item[]) => items.map(i => `${gasLabel(i.gasType)} × ${i.qty}`).join('、')
+// 'YYYY-MM-DD' → 距今天（台北）幾天
+function daysAgo(ymd: string) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const t = taipeiNow()
+  return Math.round((Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()) - Date.UTC(y, m - 1, d)) / 86400000)
+}
+const ymdText = (ymd: string) => { const [, m, d] = ymd.split('-').map(Number); return `${m}/${d}` }
+const agoText = (n: number) => n <= 0 ? '今天' : n === 1 ? '昨天' : `${n} 天前`
 
 // 本機開發測試用：localhost 加上 ?liffMock 就跳過 LINE 登入
 const MOCK = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.search.includes('liffMock')
@@ -130,6 +138,38 @@ export default function LiffOrder() {
   )
 }
 
+/* ─── 叫瓦斯紀錄 ─── */
+function HistoryCard({ history, typicalDays }: { history: { date: string; items: Item[] }[]; typicalDays: number | null }) {
+  const [open, setOpen] = useState(false)
+  if (history.length === 0) return null
+  const last = history[0]
+  const ago = daysAgo(last.date)
+  return (
+    <section className={`${CARD} mt-4`}>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-left">
+        <div>
+          <div className="text-sm text-slate-500">上次叫瓦斯</div>
+          <div className="text-lg font-bold">
+            {ymdText(last.date)}<span className="ml-2 text-base font-medium text-slate-500">（{agoText(ago)}）</span>
+          </div>
+          {typicalDays && <div className="text-sm text-slate-500 mt-0.5">您大約每 {typicalDays} 天叫一次</div>}
+        </div>
+        <svg viewBox="0 0 24 24" className={`w-5 h-5 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
+          {history.map(h => (
+            <div key={h.date} className="flex justify-between text-sm">
+              <span className="text-slate-600 tabular-nums">{ymdText(h.date)}</span>
+              <span className="text-slate-800">{itemsText(h.items)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 /* ─── 綁定／新客建檔 ─── */
 function BindForm({ api, onBound }: { api: (p: string, b?: any) => Promise<any>; onBound: () => void }) {
   const [phone, setPhone] = useState('')
@@ -222,6 +262,8 @@ function OrderForm({ me, api, onDone, onEditProfile }: {
           若是要再加訂，請繼續填寫；若只是想確認，不用重複下單。
         </div>
       )}
+
+      <HistoryCard history={me.history || []} typicalDays={me.typicalDays ?? null} />
 
       <section className={`${CARD} mt-4`}>
         <div className={LABEL}>品項與數量{me.lastItems.length > 0 && <span className="ml-2 font-normal text-slate-400">已帶入上次訂購</span>}</div>

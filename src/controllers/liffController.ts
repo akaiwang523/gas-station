@@ -82,7 +82,50 @@ export async function liffMe(req: LiffReq, res: Response) {
   const [extra] = await db.query(`SELECT phone FROM customer_phones WHERE customer_id = ? ORDER BY id`, [customerId]) as any
   const phones = [...new Set([customer.phone, customer.phone2, ...extra.map((r: any) => r.phone)].filter(Boolean))]
 
-  res.json({ bound: true, customer: { name: customer.name, address: customer.address, phones }, lastItems, activeOrder })
+  const { history, typicalDays } = await getOrderHistory(customerId)
+
+  res.json({ bound: true, customer: { name: customer.name, address: customer.address, phones }, lastItems, activeOrder, history, typicalDays })
+}
+
+// 叫瓦斯紀錄：同一天多筆合併成一筆；日期用「送達日優先」（與預測功能一致），
+// 以字串回傳避免前端時區換算差一天。typicalDays = 叫貨間隔中位數（≥3 個叫貨日才給）
+async function getOrderHistory(customerId: number) {
+  const EFFECTIVE = 'COALESCE(o.delivered_at, o.scheduled_date, o.created_at)'
+  const [rows] = await db.query(
+    `SELECT DATE_FORMAT(${EFFECTIVE}, '%Y-%m-%d') AS d, oi.gas_type, SUM(oi.quantity) AS qty
+     FROM orders o JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.customer_id = ? AND o.status NOT IN ('CANCELLED','DRAFT')
+       AND DATE(${EFFECTIVE}) >= (
+         SELECT MIN(x.d) FROM (
+           SELECT DISTINCT DATE(COALESCE(delivered_at, scheduled_date, created_at)) AS d
+           FROM orders WHERE customer_id = ? AND status NOT IN ('CANCELLED','DRAFT')
+           ORDER BY d DESC LIMIT 6
+         ) x
+       )
+     GROUP BY d, oi.gas_type
+     ORDER BY d DESC`,
+    [customerId, customerId]
+  ) as any
+
+  const byDate = new Map<string, { gasType: string; qty: number }[]>()
+  for (const r of rows) {
+    if (!byDate.has(r.d)) byDate.set(r.d, [])
+    byDate.get(r.d)!.push({ gasType: r.gas_type, qty: Number(r.qty) })
+  }
+  const all = [...byDate.entries()].map(([date, items]) => ({ date, items }))
+
+  let typicalDays: number | null = null
+  if (all.length >= 3) {
+    const gaps: number[] = []
+    for (let i = 0; i < all.length - 1; i++) {
+      gaps.push(Math.round((Date.parse(all[i].date) - Date.parse(all[i + 1].date)) / 86400000))
+    }
+    gaps.sort((a, b) => a - b)
+    const mid = Math.floor(gaps.length / 2)
+    const median = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2
+    if (median >= 1) typicalDays = Math.round(median)
+  }
+  return { history: all.slice(0, 5), typicalDays }
 }
 
 // POST /api/line/liff/bind { phone } → 找到既有客戶就綁定；找不到回 needProfile
