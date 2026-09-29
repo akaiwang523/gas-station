@@ -830,27 +830,42 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
           )}
         </div>
       )}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {['PENDING','DELIVERING','DELIVERED','SCHEDULED'].map(s => {
-          const countKey = s === 'PENDING' ? 'pending' : s === 'DELIVERING' ? 'delivering' : s === 'DELIVERED' ? 'delivered' : 'scheduled'
-          const count = counts?.[countKey]
-          return (
-          <button key={s} onClick={() => setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${filter === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {s === 'SCHEDULED' ? '📅 已排定' : STATUS_LABEL[s]}
-            {count != null && <span className="ml-1 opacity-70">{count}</span>}
-          </button>
-          )
-        })}
-        <button onClick={load} className="flex-shrink-0 px-3 py-1.5 rounded-full text-sm bg-gray-100 text-gray-600">🔄</button>
-        {pending.length > 0 && (
+      {/* 狀態導覽：只負責「現在看哪一種狀態」，不放任何操作（搜尋／重新整理／多選等另外處理） */}
+      <nav className="flex items-center border-b border-slate-200">
+        <span className="hidden sm:block flex-shrink-0 pr-3 text-xs text-slate-400">訂單狀態</span>
+        <div className="flex flex-1 overflow-x-auto">
+          {[
+            { s: 'PENDING', label: '待配送', key: 'pending' },
+            { s: 'SCHEDULED', label: '已排定', key: 'scheduled' },
+            { s: 'DELIVERING', label: '配送中', key: 'delivering' },
+            { s: 'DELIVERED', label: '已完成', key: 'delivered' },
+          ].map(({ s, label, key }) => {
+            const count = counts?.[key]
+            const active = filter === s
+            return (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                className={`flex-1 sm:flex-none min-w-[4.5rem] h-12 px-4 my-1.5 rounded-lg text-base whitespace-nowrap transition ${active ? 'bg-blue-600 text-white font-bold' : 'text-slate-600 font-medium active:bg-slate-100'}`}
+              >
+                {label}
+                {count != null && <span className={`ml-1.5 tabular-nums ${active ? 'text-white/80' : 'text-slate-400'}`}>{count}</span>}
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+      {/* 批次操作放在狀態列之外：清單上方右側一顆小按鈕 */}
+      {pending.length > 0 && (
+        <div className="flex justify-end -mt-1">
           <button
             onClick={toggleSelectMode}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition ${selectMode ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+            className={`h-10 px-4 rounded-lg text-sm font-medium border transition ${selectMode ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600 active:bg-slate-100'}`}
           >
-            ☑️ 多選
+            {selectMode ? '取消多選' : '多選'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
       {selectMode && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-2 sticky top-2 z-10">
           <div className="text-sm text-orange-800 font-medium">已選 {selectedIds.size} 筆</div>
