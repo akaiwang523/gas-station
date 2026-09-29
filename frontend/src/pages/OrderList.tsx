@@ -854,18 +854,16 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
             )
           })}
         </div>
-      </nav>
-      {/* 批次操作放在狀態列之外：清單上方右側一顆小按鈕 */}
-      {pending.length > 0 && (
-        <div className="flex justify-end -mt-1">
+        {/* 多選放在同一排最右邊，靠 ml-auto 與狀態分開 */}
+        {pending.length > 0 && (
           <button
             onClick={toggleSelectMode}
-            className={`h-10 px-4 rounded-lg text-sm font-medium border transition ${selectMode ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600 active:bg-slate-100'}`}
+            className={`flex-shrink-0 ml-3 h-10 px-4 rounded-lg text-sm font-medium border transition ${selectMode ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600 active:bg-slate-100'}`}
           >
             {selectMode ? '取消多選' : '多選'}
           </button>
-        </div>
-      )}
+        )}
+      </nav>
       {selectMode && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-2 sticky top-2 z-10">
           <div className="text-sm text-orange-800 font-medium">已選 {selectedIds.size} 筆</div>
