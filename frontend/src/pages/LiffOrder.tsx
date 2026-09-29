@@ -39,8 +39,8 @@ function daysAgo(ymd: string) {
   const t = taipeiNow()
   return Math.round((Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()) - Date.UTC(y, m - 1, d)) / 86400000)
 }
-const ymdText = (ymd: string) => { const [, m, d] = ymd.split('-').map(Number); return `${m}/${d}` }
-const agoText = (n: number) => n <= 0 ? '今天' : n === 1 ? '昨天' : `${n} 天前`
+const ymdText = (ymd: string) => { const [y, m, d] = ymd.split('-').map(Number); return y === taipeiNow().getFullYear() ? `${m}/${d}` : `${y}/${m}/${d}` }
+const agoText = (n: number) => n <= 0 ? '今天' : n === 1 ? '昨天' : n < 60 ? `${n} 天前` : n < 365 ? `約 ${Math.round(n / 30)} 個月前` : `超過 ${Math.floor(n / 365)} 年`
 
 // 本機開發測試用：localhost 加上 ?liffMock 就跳過 LINE 登入
 const MOCK = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.search.includes('liffMock')
@@ -138,34 +138,19 @@ export default function LiffOrder() {
   )
 }
 
-/* ─── 叫瓦斯紀錄 ─── */
-function HistoryCard({ history, typicalDays }: { history: { date: string; items: Item[] }[]; typicalDays: number | null }) {
-  const [open, setOpen] = useState(false)
+/* ─── 上次叫瓦斯 ─── */
+function HistoryCard({ history }: { history: { date: string; items: Item[] }[]; typicalDays?: number | null }) {
   if (history.length === 0) return null
   const last = history[0]
-  const ago = daysAgo(last.date)
   return (
     <section className={`${CARD} mt-4`}>
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-left">
-        <div>
-          <div className="text-sm text-slate-500">上次叫瓦斯</div>
-          <div className="text-lg font-bold">
-            {ymdText(last.date)}<span className="ml-2 text-base font-medium text-slate-500">（{agoText(ago)}）</span>
-          </div>
-          {typicalDays && <div className="text-sm text-slate-500 mt-0.5">您大約每 {typicalDays} 天叫一次</div>}
+      <div className="text-sm text-slate-500">上次叫瓦斯</div>
+      <div className="mt-0.5 flex items-baseline justify-between gap-3">
+        <div className="text-lg font-bold">
+          {ymdText(last.date)}<span className="ml-2 text-base font-medium text-slate-500">（{agoText(daysAgo(last.date))}）</span>
         </div>
-        <svg viewBox="0 0 24 24" className={`w-5 h-5 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-      </button>
-      {open && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
-          {history.map(h => (
-            <div key={h.date} className="flex justify-between text-sm">
-              <span className="text-slate-600 tabular-nums">{ymdText(h.date)}</span>
-              <span className="text-slate-800">{itemsText(h.items)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+        <div className="text-base text-slate-700 text-right">{itemsText(last.items)}</div>
+      </div>
     </section>
   )
 }
