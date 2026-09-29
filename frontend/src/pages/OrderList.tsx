@@ -104,6 +104,8 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
   const [predExpanded, setPredExpanded] = useState(false)
   const [lowConfExpanded, setLowConfExpanded] = useState(false)
   const [lineInquiries, setLineInquiries] = useState<any[]>([])
+  const [lineUnacked, setLineUnacked] = useState<any[]>([])
+  const [ackingId, setAckingId] = useState<number | null>(null)
   const [inquiriesExpanded, setInquiriesExpanded] = useState(false)
   const [baselinePrices, setBaselinePrices] = useState<Record<string, number>>({})
   const [inquiryActionId, setInquiryActionId] = useState<number | null>(null)
@@ -175,6 +177,10 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
         const pred = await api.getPredictions()
         setPredictions(pred.predictions || [])
         setLowConfPredictions(pred.lowConfidence || [])
+      } catch {}
+      try {
+        const un = await api.getLineUnacked()
+        setLineUnacked(un.orders || [])
       } catch {}
       try {
         const inq = await api.getLineInquiries('PENDING')
@@ -789,6 +795,46 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
               </div>
             </>
           )}
+        </div>
+      )}
+      {/* LINE 新單：LINE 進來不會響，一定要有人按「收到」（同時補寫紙本出貨單）才會消失。不分分頁、不管排哪天都列在最上面 */}
+      {lineUnacked.length > 0 && (
+        <div className="bg-green-50 border-2 border-green-500 rounded-2xl p-3">
+          <div className="text-base font-bold text-green-800 mb-2">
+            LINE 新單 {lineUnacked.length} 筆
+            <span className="ml-2 text-sm font-normal text-green-700">寫好出貨單後按「收到」</span>
+          </div>
+          <div className="space-y-2">
+            {lineUnacked.map(o => (
+              <div key={o.id} className="bg-white rounded-xl border border-green-200 px-3 py-2.5 flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="truncate text-lg font-bold text-slate-900">{o.customer_name}</span>
+                    <span className="flex-shrink-0 text-xs text-slate-400">
+                      {new Date(o.created_at).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}
+                    </span>
+                  </div>
+                  <div className="truncate text-[15px] text-slate-700">{o.customer_address}</div>
+                  <div className="text-[15px] text-slate-900 font-medium mt-0.5">
+                    {(o.items || []).map((i: any) => `${String(i.gasType).replace('BOTTLED_', '').replace('KG', 'kg')} × ${i.qty}`).join('、')}
+                    {o.note && <span className="ml-2 font-normal text-slate-500">{o.note}</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    setAckingId(o.id)
+                    try {
+                      await api.ackLineOrder(o.id)
+                      setLineUnacked(prev => prev.filter(x => x.id !== o.id))
+                    } catch (e: any) { showToast(e.message || '操作失敗', 'error') }
+                    finally { setAckingId(null) }
+                  }}
+                  disabled={ackingId === o.id}
+                  className="flex-shrink-0 h-12 px-5 rounded-xl bg-blue-600 text-white font-bold disabled:bg-slate-300"
+                >{ackingId === o.id ? '…' : '收到'}</button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {lineInquiries.length > 0 && (

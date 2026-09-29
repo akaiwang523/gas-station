@@ -657,6 +657,8 @@ export async function convertLineInquiryToOrder(req: Request, res: Response) {
   try {
     const r = await insertLineOrder(inq.customer_id, items, null, '文字訊息', String(inq.message || '').slice(0, 200))
     await db.query(`UPDATE line_inquiries SET status = 'HANDLED' WHERE id = ?`, [id])
+    // 這張單是工作人員自己按出來的，已經有人看到了，不用再列進「LINE 新單」
+    await db.query(`UPDATE orders SET line_ack_at = NOW() WHERE id = ?`, [r.orderId])
     res.json({ ok: true, orderId: r.orderId, summary: r.itemsSummary })
   } catch (err) {
     console.error('[inquiry to order]', err)

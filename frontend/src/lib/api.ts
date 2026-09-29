@@ -74,6 +74,8 @@ export const api = {
   getPredictions: () => request('/predictions'),
   getLineInquiries: (status?: string) => request(`/line/inquiries${status ? `?status=${status}` : ''}`),
   handleLineInquiry: (id: number) => request(`/line/inquiries/${id}/handle`, { method: 'PATCH' }),
+  getLineUnacked: () => request('/orders/line-unacked'),
+  ackLineOrder: (id: number) => request(`/orders/${id}/ack`, { method: 'PATCH' }),
   lineInquiryToOrder: (id: number) => request(`/line/inquiries/${id}/to-order`, { method: 'POST' }),
   dismissPrediction: (customerId: number) => request(`/predictions/${customerId}/dismiss`, { method: 'POST' }),
   notifyPrediction: (customerId: number) => request(`/predictions/${customerId}/notify`, { method: 'POST' }),

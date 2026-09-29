@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { authenticate } from '../middleware/auth'
 import { autoCompleteStaleOrders } from '../lib/autoCompleteStale'
-import { listOrders, createOrder, updateOrderStatus, bulkUpdateOrderStatus, updateOrder, rescheduleOrder, collectPayment, getTodaySummary, getOrderCounts, getLineActivity, cancelOrder, deleteOrder, bulkDeleteOrders } from '../controllers/orderController'
+import { listOrders, createOrder, updateOrderStatus, bulkUpdateOrderStatus, updateOrder, rescheduleOrder, collectPayment, getTodaySummary, getOrderCounts, getLineActivity, cancelOrder, deleteOrder, bulkDeleteOrders, listLineUnacked, ackLineOrder } from '../controllers/orderController'
 
 export const orderRoutes = Router()
 orderRoutes.use(authenticate)
@@ -9,6 +9,7 @@ orderRoutes.get('/', listOrders)
 orderRoutes.get('/summary', getTodaySummary)
 orderRoutes.get('/counts', getOrderCounts)
 orderRoutes.get('/line-activity', getLineActivity)
+orderRoutes.get('/line-unacked', listLineUnacked)
 orderRoutes.post('/', createOrder)
 orderRoutes.patch('/bulk-status', bulkUpdateOrderStatus)
 orderRoutes.post('/bulk-delete', bulkDeleteOrders)
@@ -16,6 +17,7 @@ orderRoutes.post('/bulk-delete', bulkDeleteOrders)
 orderRoutes.post('/auto-complete-stale', async (_req, res, next) => {
   try { res.json(await autoCompleteStaleOrders()) } catch (e) { next(e) }
 })
+orderRoutes.patch('/:id/ack', ackLineOrder)
 orderRoutes.patch('/:id/status', updateOrderStatus)
 orderRoutes.post('/:id/payment', collectPayment)
 orderRoutes.patch('/:id/cancel', cancelOrder)

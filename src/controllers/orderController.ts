@@ -531,3 +531,32 @@ export async function bulkDeleteOrders(req: Request, res: Response) {
   }
   res.json({ ok: true, deleted, skipped })
 }
+
+// LINE 新單確認：LINE 進來的單不會響，要有人按「收到」（同時補寫紙本出貨單）才算有人看到。
+// GET /api/orders/line-unacked — 所有分頁共用，不管排哪天都列出來
+export async function listLineUnacked(_req: Request, res: Response) {
+  const [rows] = await db.query(
+    `SELECT o.id, o.customer_id, o.note, o.scheduled_date, o.created_at, o.total_amount,
+            c.name AS customer_name, c.address AS customer_address, c.phone AS customer_phone
+     FROM orders o JOIN customers c ON c.id = o.customer_id
+     WHERE o.source = 'LINE' AND o.line_ack_at IS NULL AND o.status NOT IN ('CANCELLED','DRAFT')
+     ORDER BY o.created_at`
+  ) as any
+  const ids = rows.map((r: any) => r.id)
+  const itemsBy: Record<number, any[]> = {}
+  if (ids.length) {
+    const [items] = await db.query(
+      `SELECT order_id, gas_type, quantity FROM order_items WHERE order_id IN (${ids.map(() => '?').join(',')})`, ids
+    ) as any
+    for (const it of items) (itemsBy[it.order_id] ||= []).push({ gasType: it.gas_type, qty: Number(it.quantity) })
+  }
+  res.json({ orders: rows.map((r: any) => ({ ...r, items: itemsBy[r.id] || [] })) })
+}
+
+// PATCH /api/orders/:id/ack
+export async function ackLineOrder(req: Request, res: Response) {
+  const id = Number(req.params.id)
+  if (!id) return res.status(400).json({ error: '缺少編號' })
+  await db.query(`UPDATE orders SET line_ack_at = NOW() WHERE id = ? AND line_ack_at IS NULL`, [id])
+  res.json({ ok: true })
+}

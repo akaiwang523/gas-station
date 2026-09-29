@@ -9,7 +9,8 @@ import { db } from './db'
 // 所以晚上拿出貨單對帳時，沒有出貨單的一樣會被抓出來作廢。
 // 備註會加上「隔日自動完成」，對帳頁看得出來是系統按的，不是人按的。
 //
-// 不會動到：已排定在今天或之後的單（scheduled_date >= 今天）、已完成、已取消、草稿。
+// 不會動到：已排定在今天或之後的單（scheduled_date >= 今天）、已完成、已取消、草稿，
+// 以及還沒有人按「收到」的 LINE 單（沒人看到的單不能被系統默默結掉，那就真的漏單了）。
 // delivered_at 用訂單自己那天（有排定日用排定日中午，否則用建立時間），
 // 不用「現在」——否則會全部算成今天送達，灌爆今天的統計（08/03 的教訓）
 export async function autoCompleteStaleOrders(): Promise<{ completed: number; ids: number[] }> {
@@ -18,7 +19,8 @@ export async function autoCompleteStaleOrders(): Promise<{ completed: number; id
   const [rows] = await db.query(
     `SELECT id FROM orders
      WHERE status IN ('PENDING', 'ASSIGNED', 'DELIVERING')
-       AND DATE(COALESCE(scheduled_date, CONVERT_TZ(created_at, '+00:00', '+08:00'))) < ?`,
+       AND DATE(COALESCE(scheduled_date, CONVERT_TZ(created_at, '+00:00', '+08:00'))) < ?
+       AND NOT (source = 'LINE' AND line_ack_at IS NULL)`,
     [today]
   ) as any
   const ids: number[] = rows.map((r: any) => r.id)
