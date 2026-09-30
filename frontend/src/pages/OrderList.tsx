@@ -979,7 +979,7 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="truncate text-lg font-bold text-slate-900 leading-tight">{order.customer_name}</span>
+                      <span className="flex-shrink-0 max-w-full truncate text-lg font-bold text-slate-900 leading-tight">{order.customer_name}</span>
                       {onEditCustomer && (
                         <button
                           onClick={e => { e.stopPropagation(); onEditCustomer(order.customer_id) }}
@@ -999,9 +999,9 @@ export default function OrderList({ refresh, onEditCustomer }: { refresh?: numbe
                         <span className="rounded-full font-medium whitespace-nowrap text-[11px] px-2 py-0.5 bg-red-500 text-white flex-shrink-0">再次來電</span>
                       )}
                       <SourceBadge source={order.source} />
-                      {order.customer_phone && (
+                      {order.customer_phone && !(order.customer_name || '').includes(order.customer_phone) && (
                         <a href={`tel:${order.customer_phone}`} onClick={e => e.stopPropagation()}
-                          className="hidden lg:inline ml-1 text-[13px] text-slate-500 hover:text-blue-600 tabular-nums whitespace-nowrap">
+                          className="hidden lg:inline min-w-0 truncate ml-1 text-[13px] text-slate-500 hover:text-blue-600 tabular-nums whitespace-nowrap">
                           {order.customer_phone}
                         </a>
                       )}
